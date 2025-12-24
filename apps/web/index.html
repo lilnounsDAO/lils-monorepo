@@ -6,14 +6,25 @@
     <title>Lil Nouns</title>
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <script>
-      // Polyfill process for browser
-      if (typeof process === 'undefined') {
-        window.process = {
-          env: { NODE_ENV: 'production' },
-          browser: true,
-          version: 'v20.0.0'
-        };
-      }
+      // Polyfill process for browser - must be available globally
+      (function() {
+        if (typeof process === 'undefined') {
+          var processPolyfill = {
+            env: { NODE_ENV: 'production' },
+            browser: true,
+            version: 'v20.0.0'
+          };
+          // Set on window and global scope
+          window.process = processPolyfill;
+          if (typeof globalThis !== 'undefined') {
+            globalThis.process = processPolyfill;
+          }
+          // Also make it available as a global variable
+          try {
+            eval('var process = processPolyfill');
+          } catch(e) {}
+        }
+      })();
     </script>
     <meta name="description" content="Lil Nouns DAO - A generative avatar art collective run by a group of crypto misfits" />
     
