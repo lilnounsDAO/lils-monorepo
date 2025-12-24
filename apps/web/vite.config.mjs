@@ -32,6 +32,16 @@ export default defineConfig({
         }
         return null;
       },
+      transform(code, id) {
+        // Replace require("fs") calls in CommonJS modules
+        if (id.includes('node_modules') && code.includes('require("fs")')) {
+          return {
+            code: code.replace(/require\(["']fs["']\)/g, '{}').replace(/require\(["']node:fs["']\)/g, '{}'),
+            map: null,
+          };
+        }
+        return null;
+      },
       generateBundle(options, bundle) {
         Object.keys(bundle).forEach((fileName) => {
           const file = bundle[fileName];
