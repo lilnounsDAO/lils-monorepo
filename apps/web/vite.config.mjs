@@ -12,7 +12,9 @@ const __dirname = dirname(__filename)
 export default defineConfig({
   plugins: [
     react(),
-    tsconfigPaths(), // Handles path aliases from tsconfig
+    tsconfigPaths({
+      ignoreConfigErrors: true, // Ignore errors in subgraph packages' tsconfig files
+    }), // Handles path aliases from tsconfig
     discordApiPlugin(), // Handle Discord API proxy in dev
     ogImagesPlugin(), // Handle OG image API routes in dev
     // Remove fs imports from client bundle
@@ -159,11 +161,12 @@ export default defineConfig({
         {
           name: 'replace-fs',
           setup(build) {
-            build.onResolve({ filter: /^(fs|node:fs|node:fs\/promises)$/ }, () => ({
-              path: '\0virtual:fs-stub',
+            build.onResolve({ filter: /^(fs|node:fs|node:fs\/promises)$/ }, (args) => ({
+              path: args.path,
+              namespace: 'fs-stub',
             }));
-            build.onLoad({ filter: /^\0virtual:fs-stub$/ }, () => ({
-              contents: 'export default {};',
+            build.onLoad({ filter: /.*/, namespace: 'fs-stub' }, () => ({
+              contents: 'export default {}; export const readFile = () => Promise.resolve(); export const writeFile = () => Promise.resolve(); export const readFileSync = () => ""; export const writeFileSync = () => {};',
               loader: 'js',
             }));
           },
