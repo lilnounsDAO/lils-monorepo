@@ -1,0 +1,14 @@
+{
+  "name": "@nouns/tailwind-config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "files": ["index.js"],
+  "dependencies": {
+    "tailwindcss": "^3.4.1",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

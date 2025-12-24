@@ -1,0 +1,136 @@
+"use client";
+
+import { useState } from "react";
+import { useAccount } from "wagmi";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { SnapshotProposal } from "@/data/snapshot/getSnapshotProposals";
+import Icon from "@/components/ui/Icon";
+import { Check } from "lucide-react";
+import clsx from "clsx";
+
+interface SnapshotVoteFormProps {
+  snapshotProposal: SnapshotProposal;
+  onVote: (choice: number, reason?: string) => Promise<void>;
+  isLoading?: boolean;
+}
+
+export function SnapshotVoteForm({ snapshotProposal, onVote, isLoading }: SnapshotVoteFormProps) {
+  const { isConnected } = useAccount();
+  const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
+  const [reason, setReason] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleVote = async () => {
+    if (selectedChoice === null) return;
+
+    setIsSubmitting(true);
+    try {
+      await onVote(selectedChoice, reason || undefined);
+      // Reset form after successful vote
+      setSelectedChoice(null);
+      setReason("");
+    } catch (error) {
+      console.error("Failed to vote:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const choices = snapshotProposal.choices || ["For", "Against", "Abstain"];
+
+  return (
+    <div className="flex w-full flex-col gap-4 rounded-[16px] border p-6">
+      <div className="flex items-center gap-2">
+        <Icon icon="vote" size={20} className="fill-semantic-accent" />
+        <h3 className="heading-6">Lil Nouns Vote</h3>
+      </div>
+
+      <p className="text-content-secondary paragraph-sm">
+        Vote on this Nouns DAO proposal using Snapshot. Your vote will be recorded off-chain.
+      </p>
+
+      {snapshotProposal.state === "active" ? (
+        <>
+          {!isConnected ? (
+            <div className="flex flex-col gap-3 rounded-[12px] border border-semantic-warning bg-yellow-50 p-4">
+              <p className="text-sm text-content-secondary">
+                Connect your wallet to vote on this proposal
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2">
+                {choices.map((choice, index) => {
+                  const choiceNum = index + 1;
+                  const isSelected = selectedChoice === choiceNum;
+                  
+                  return (
+                    <button
+                      key={choiceNum}
+                      onClick={() => setSelectedChoice(choiceNum)}
+                      disabled={isSubmitting}
+                      className={clsx(
+                        "flex items-center gap-3 rounded-[12px] border p-4 text-left transition-all",
+                        isSelected
+                          ? "border-semantic-accent bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                      )}
+                    >
+                      <div className={clsx(
+                        "flex h-8 w-8 items-center justify-center rounded-full border-2",
+                        isSelected 
+                          ? "border-semantic-accent bg-white" 
+                          : "border-gray-300"
+                      )}>
+                        {isSelected && (
+                          <Check size={20} className="text-semantic-accent" />
+                        )}
+                      </div>
+                      <span className="label-md">{choice}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="label-sm text-content-secondary">
+                  Reason (optional)
+                </label>
+                <Textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Share your reasoning for this vote..."
+                  rows={4}
+                  disabled={isSubmitting}
+                  className="resize-none"
+                />
+              </div>
+
+              <Button
+                onClick={handleVote}
+                disabled={selectedChoice === null || isSubmitting}
+                className="w-full"
+              >
+                {isSubmitting ? "Submitting vote..." : "Submit Vote"}
+              </Button>
+            </>
+          )}
+        </>
+      ) : snapshotProposal.state === "closed" ? (
+        <div className="flex flex-col gap-2 rounded-[12px] border border-gray-200 bg-gray-50 p-4">
+          <p className="text-sm text-content-secondary">
+            This Snapshot vote has ended. Nouns DAO voting is now active.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 rounded-[12px] border border-gray-200 bg-gray-50 p-4">
+          <p className="text-sm text-content-secondary">
+            This Snapshot vote has not started yet.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+

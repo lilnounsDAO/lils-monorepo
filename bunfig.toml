@@ -1,0 +1,9 @@
+[install]
+# Equivalent to pnpm's frozen-lockfile for CI
+exact = true
+# Enable hoisting for better performance
+hoistPattern = ["*"]
+
+[install.scopes]
+# Workspace configuration
+"@nouns" = { }

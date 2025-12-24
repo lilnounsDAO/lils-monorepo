@@ -1,0 +1,35 @@
+/* Custom Fonts for Vite */
+
+/* Londrina Solid from Google Fonts - @import must come first */
+@import url('https://fonts.googleapis.com/css2?family=Londrina+Solid:wght@100;300;400;900&display=swap');
+
+/* PT Root UI Font Family */
+@font-face {
+  font-family: 'PT Root UI';
+  src: url('/fonts/pt-root-ui_regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'PT Root UI';
+  src: url('/fonts/pt-root-ui_medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'PT Root UI';
+  src: url('/fonts/pt-root-ui_bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* CSS Variables for Tailwind */
+:root {
+  --font-pt-root-ui: 'PT Root UI', system-ui, -apple-system, sans-serif;
+  --font-londrina-solid: 'Londrina Solid', cursive;
+}

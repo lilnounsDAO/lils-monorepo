@@ -1,0 +1,21 @@
+{
+  "extends": "@nouns/typescript-config/base.json",
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "strict": true,
+    "target": "ESNext",
+    "incremental": false
+  },
+  "include": ["src"], // Include your source files
+  "exclude": ["node_modules", "dist"] // Exclude unnecessary directories
+}
