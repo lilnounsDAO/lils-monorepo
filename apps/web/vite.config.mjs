@@ -50,6 +50,8 @@ export default defineConfig({
         'node:events',
         'node:os',
         'node:path',
+        'node:fs',
+        'node:fs/promises',
         'node:child_process',
         'node:crypto'
       ],

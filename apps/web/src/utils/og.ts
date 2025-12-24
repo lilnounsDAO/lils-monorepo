@@ -1,6 +1,3 @@
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
-
 export async function loadGoogleFont(font: string, text: string) {
   const url = `https://fonts.googleapis.com/css2?family=${font}&text=${encodeURIComponent(text)}`;
   const css = await (await fetch(url)).text();
