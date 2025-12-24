@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lil Nouns</title>
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <script>
+      // Polyfill process for browser
+      if (typeof process === 'undefined') {
+        window.process = {
+          env: { NODE_ENV: 'production' },
+          browser: true,
+          version: 'v20.0.0'
+        };
+      }
+    </script>
     <meta name="description" content="Lil Nouns DAO - A generative avatar art collective run by a group of crypto misfits" />
     
     <!-- Open Graph -->

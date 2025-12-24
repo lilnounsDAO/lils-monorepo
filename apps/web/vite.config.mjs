@@ -130,7 +130,12 @@ export default defineConfig({
   
   // Environment variables
   define: {
-    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+    'process.env': JSON.stringify({ NODE_ENV: process.env.NODE_ENV || 'production' }),
+    'process.browser': 'true',
+    'process.version': '"v20.0.0"',
+    // Define process as an object for direct access
+    'typeof process': '"object"',
     global: 'globalThis',
   },
   
