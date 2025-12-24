@@ -15,6 +15,23 @@ export default defineConfig({
     tsconfigPaths(), // Handles path aliases from tsconfig
     discordApiPlugin(), // Handle Discord API proxy in dev
     ogImagesPlugin(), // Handle OG image API routes in dev
+    // Remove fs imports from client bundle
+    {
+      name: 'remove-fs-imports',
+      generateBundle(options, bundle) {
+        Object.keys(bundle).forEach((fileName) => {
+          const file = bundle[fileName];
+          if (file.type === 'chunk' && file.code) {
+            // Remove fs imports
+            file.code = file.code.replace(/import\s+.*?\s+from\s+["']fs["'];?/g, '');
+            file.code = file.code.replace(/import\s+.*?\s+from\s+["']node:fs["'];?/g, '');
+            file.code = file.code.replace(/import\s+.*?\s+from\s+["']node:fs\/promises["'];?/g, '');
+            file.code = file.code.replace(/require\(["']fs["']\)/g, '{}');
+            file.code = file.code.replace(/require\(["']node:fs["']\)/g, '{}');
+          }
+        });
+      },
+    },
   ],
   
   // Development server configuration optimized for Turborepo
@@ -81,6 +98,10 @@ export default defineConfig({
       buffer: 'buffer',
       process: 'process/browser',
       util: 'util',
+      // Stub out Node.js built-ins that shouldn't be in browser
+      'fs': false,
+      'node:fs': false,
+      'node:fs/promises': false,
     },
     dedupe: ['react', 'react-dom'], // Prevent duplicate React instances
   },
