@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useBuyNounVRGDA } from '@/hooks/transactions/useBuyNounVRGDA';
 import { vrgdaSeedToImage } from '@/data/ponder/vrgda/vrgdaSeedToImage';
 import { VrgdaPoolSeed } from '@/data/ponder/vrgda/types';
