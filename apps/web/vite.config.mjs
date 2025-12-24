@@ -18,11 +18,25 @@ export default defineConfig({
     // Remove fs imports from client bundle
     {
       name: 'remove-fs-imports',
+      resolveId(id, importer) {
+        // Intercept fs module resolution and return empty module
+        if (id === 'fs' || id === 'node:fs' || id === 'node:fs/promises') {
+          return '\0virtual:fs-stub';
+        }
+        return null;
+      },
+      load(id) {
+        // Return empty module for fs stubs
+        if (id === '\0virtual:fs-stub') {
+          return 'export default {}; export const readFile = () => Promise.resolve(); export const writeFile = () => Promise.resolve(); export const readFileSync = () => ""; export const writeFileSync = () => {}; export const existsSync = () => false; export const mkdirSync = () => {}; export const statSync = () => ({ isFile: () => false, isDirectory: () => false });';
+        }
+        return null;
+      },
       generateBundle(options, bundle) {
         Object.keys(bundle).forEach((fileName) => {
           const file = bundle[fileName];
           if (file.type === 'chunk' && file.code) {
-            // Remove fs imports
+            // Remove any remaining fs imports from final bundle
             file.code = file.code.replace(/import\s+.*?\s+from\s+["']fs["'];?/g, '');
             file.code = file.code.replace(/import\s+.*?\s+from\s+["']node:fs["'];?/g, '');
             file.code = file.code.replace(/import\s+.*?\s+from\s+["']node:fs\/promises["'];?/g, '');
@@ -98,10 +112,6 @@ export default defineConfig({
       buffer: 'buffer',
       process: 'process/browser',
       util: 'util',
-      // Stub out Node.js built-ins that shouldn't be in browser
-      'fs': false,
-      'node:fs': false,
-      'node:fs/promises': false,
     },
     dedupe: ['react', 'react-dom'], // Prevent duplicate React instances
   },
@@ -133,6 +143,23 @@ export default defineConfig({
       'sharp',
       'dotenv',
     ],
+    esbuildOptions: {
+      // Replace fs imports with empty module during pre-bundling
+      plugins: [
+        {
+          name: 'replace-fs',
+          setup(build) {
+            build.onResolve({ filter: /^(fs|node:fs|node:fs\/promises)$/ }, () => ({
+              path: '\0virtual:fs-stub',
+            }));
+            build.onLoad({ filter: /^\0virtual:fs-stub$/ }, () => ({
+              contents: 'export default {};',
+              loader: 'js',
+            }));
+          },
+        },
+      ],
+    },
     force: true, // Force optimization on workspace changes
   },
   
