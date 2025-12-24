@@ -17,6 +17,32 @@ export default defineConfig({
     }), // Handles path aliases from tsconfig
     discordApiPlugin(), // Handle Discord API proxy in dev
     ogImagesPlugin(), // Handle OG image API routes in dev
+    // Inject process polyfill
+    {
+      name: 'inject-process-polyfill',
+      transformIndexHtml(html) {
+        return html.replace(
+          '<head>',
+          `<head>
+    <script>
+      // Polyfill process for browser - must be available globally before modules load
+      (function() {
+        if (typeof process === 'undefined') {
+          var processPolyfill = {
+            env: { NODE_ENV: 'production' },
+            browser: true,
+            version: 'v20.0.0'
+          };
+          window.process = processPolyfill;
+          if (typeof globalThis !== 'undefined') {
+            globalThis.process = processPolyfill;
+          }
+        }
+      })();
+    </script>`
+        );
+      },
+    },
     // Remove fs imports from client bundle
     {
       name: 'remove-fs-imports',
