@@ -160,8 +160,6 @@ export default defineConfig({
     'process.env': JSON.stringify({ NODE_ENV: process.env.NODE_ENV || 'production' }),
     'process.browser': 'true',
     'process.version': '"v20.0.0"',
-    // Define process as an object for direct access
-    'typeof process': '"object"',
     global: 'globalThis',
   },
   
