@@ -74,6 +74,8 @@ dist
 # Gatsby files
 .cache/
 public
+# But allow apps/web/public for Vite static assets
+!apps/web/public/
 
 # Storybook build outputs
 .out

@@ -1,0 +1,21 @@
+{
+  "name": "LilNouns.wtf",
+  "short_name": "Lil Nouns",
+  "description": "LilNouns DAO - A generative avatar art collective run by a group of crypto misfits",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
