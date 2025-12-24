@@ -1,7 +1,7 @@
 [build]
   base = "."
   publish = "apps/web/dist"
-  command = "bun install --frozen-lockfile && cd packages/types && bun run build && cd ../ui && (bun run build || true) && cd ../.. && cd apps/web && bun run build"
+  command = "bun install --frozen-lockfile && cd packages/types && bun run build && cd ../assets && bun run build && cd ../ui && (bun run build || true) && cd ../.. && cd apps/web && bun run build"
 
 # Build environment
 [build.environment]
