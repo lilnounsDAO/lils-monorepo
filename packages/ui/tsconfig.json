@@ -1,3 +1,11 @@
 {
-  "extends": "../../tooling/typescript-config/react.json"
+  "extends": "../../tooling/typescript-config/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "incremental": false
+  },
+  "include": ["src/**/*"]
 }
