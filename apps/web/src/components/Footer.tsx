@@ -11,6 +11,7 @@ const NAV_ITEMS: { name: string; href: string; external?: boolean }[][] = [
     // { name: "Stats", href: "/stats" },
     { name: "Vote", href: "/vote" },
     { name: "Learn", href: "/learn" },
+    { name: "Traits", href: "/traits" },
   ],
   // [
   //   { name: "Bid", href: "/" },
