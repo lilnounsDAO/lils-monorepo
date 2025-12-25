@@ -31,6 +31,7 @@ import ProposalEditorScreen from './components/ProposalEditor/ProposalEditorScre
 import '@rainbow-me/rainbowkit/styles.css'
 import TopicDetailPage from './pages/TopicDetailPage'
 import ProfilesPage from './pages/ProfilesPage'
+import TraitsPage from './pages/TraitsPage'
 
 function App() {
   const jsonLd = {
@@ -105,6 +106,7 @@ function App() {
               <Route path="learn" element={<LearnPage />} />
               <Route path="learn/:slug" element={<LearnPage />} />
               <Route path="vrgda/explore" element={<VRGDAExplorePage />} />
+              <Route path="traits" element={<TraitsPage />} />
 
               {/* Proposal Editor */}
               <Route path="new" element={<ProposalEditorScreen />} />

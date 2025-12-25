@@ -56,6 +56,7 @@
     "graphql": "^16.8.1",
     "hono": "^4.8.5",
     "is-hotkey": "0.2.0",
+    "jszip": "3.10.1",
     "lodash": "^4.17.21",
     "lucide-react": "^0.474.0",
     "marked": "16.4.1",
@@ -93,6 +94,7 @@
   "devDependencies": {
     "@nouns/eslint-config": "workspace:*",
     "@nouns/typescript-config": "workspace:*",
+    "@types/jszip": "3.4.1",
     "@types/lodash": "^4.17.5",
     "@types/node": "^20.12.13",
     "@types/react": "18.3.12",

@@ -140,13 +140,20 @@ const TRAIT_TYPE_VIEW_BOX: Record<NounTraitType, string> = {
 export function buildNounTraitImage(
   traitType: NounTraitType,
   seed: number,
+  useFullViewBox: boolean = false,
 ): string {
   const data = getPartData(traitType, seed);
-  let viewBox = TRAIT_TYPE_VIEW_BOX[traitType];
+  let viewBox = useFullViewBox ? "0 0 320 320" : TRAIT_TYPE_VIEW_BOX[traitType];
+  
+  // When using full viewBox, don't add background color - let CSS checkerboard show through
+  // Only add background for background trait type itself
+  const bgColor = traitType == "background" 
+    ? bgcolors[seed] 
+    : undefined;
 
   return buildBase64Image(
     [{ data }],
-    traitType == "background" ? bgcolors[seed] : undefined,
+    bgColor,
     viewBox,
   );
 }
