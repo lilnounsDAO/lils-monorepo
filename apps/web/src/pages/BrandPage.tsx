@@ -142,7 +142,7 @@ export default function BrandPage() {
         <div className="flex w-full flex-col gap-4">
           <h4 className="text-xl font-bold text-content-primary">License</h4>
           <p className="text-content-secondary">
-            The logos, traits and every Noun generated on the playground are{' '}
+            The logos, traits and every Lil Noun generated on the playground are{' '}
             <a
               href="https://creativecommons.org/publicdomain/zero/1.0/"
               target="_blank"
