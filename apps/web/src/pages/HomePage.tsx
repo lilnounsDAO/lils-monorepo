@@ -2,20 +2,33 @@ import { useEffect, useState } from 'react'
 import { Helmet } from 'react-helmet-async'
 import { useSearchParams } from 'react-router-dom'
 import Auction from '@/components/Auction'
-import { VRGDANounPool } from '@/components/Auction/VRGDANounPool'
 import NounsFundsIdeas from '@/components/home/NounsFundsIdeas'
 import ThisIsNouns from '@/components/home/ThisIsNouns'
-import GovernedByYou from '@/components/home/GovernedByYou'
 import TheseAreNouns from '@/components/home/TheseAreNouns'
-import AlreadyOwnANoun from '@/components/home/AlreadyOwnANoun'
 import ByTheNumbers from '@/components/home/ByTheNumbers'
 import Faq from '@/components/home/Faq'
 import StartJourney from '@/components/home/StartJourney'
-import GetANoun from '@/components/home/GetANoun'
 import LearnAboutNounsDao from '@/components/home/LearnAboutNounsDao'
 import { isVRGDANoun } from '@/utils/vrgdaUtils'
 import { getCurrentAuctionNounId } from '@/data/auction/getCurrentAuctionNounId'
 import JoinCommunity from '@/components/home/JoinCommunity'
+
+const NounspotMap = () =>  {
+  return (
+    <section className="flex w-full max-w-[1680px] flex-col items-center gap-6 md:gap-12 px-6 md:px-10">
+    <iframe
+      src="https://nounspot.com/embed?sidebar=true&toggle=false&addspot=false&header=true"
+      width="100%"
+      height="700px"
+      style={{ border: 0, borderRadius: '16px', overflow: 'hidden' }}
+      allow="geolocation"
+      loading="lazy"
+      referrerPolicy="no-referrer-when-downgrade"
+      title="Nounspot Map"
+    />
+  </section>
+  )
+}
 
 export default function HomePage() {
   const [searchParams] = useSearchParams()
@@ -75,10 +88,8 @@ export default function HomePage() {
 
         <NounsFundsIdeas />
         <ByTheNumbers />
-        {/* <GovernedByYou /> */}
         <TheseAreNouns />
-        {/* <GetANoun /> */}
-        {/* <AlreadyOwnANoun /> */}
+        <NounspotMap />
         <StartJourney />
         <JoinCommunity />
         <LearnAboutNounsDao />
