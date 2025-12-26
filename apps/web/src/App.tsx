@@ -32,6 +32,7 @@ import '@rainbow-me/rainbowkit/styles.css'
 import TopicDetailPage from './pages/TopicDetailPage'
 import ProfilesPage from './pages/ProfilesPage'
 import TraitsPage from './pages/TraitsPage'
+import BrandPage from './pages/BrandPage'
 
 function App() {
   const jsonLd = {
@@ -107,8 +108,9 @@ function App() {
               <Route path="learn/:slug" element={<LearnPage />} />
               <Route path="vrgda/explore" element={<VRGDAExplorePage />} />
               <Route path="traits" element={<TraitsPage />} />
-
-              {/* Proposal Editor */}
+              <Route path="brand" element={<BrandPage />} />
+             
+             {/* Proposal Editor */}
               <Route path="new" element={<ProposalEditorScreen />} />
               <Route path="new/proposal" element={<ProposalEditorScreen />} />
               <Route path="new/candidate" element={<ProposalEditorScreen />} />
