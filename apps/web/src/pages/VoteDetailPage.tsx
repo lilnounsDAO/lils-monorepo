@@ -1416,7 +1416,9 @@ If client owners feel their current share or incentives from the DAO aren\'t eno
       }
       votesByVoter.get(key)!.push({
         type: 'snapshot',
-        choice: vote.choice === 1 ? 1 : vote.choice === 2 ? 0 : 2, // Convert to same format
+        // Snapshot (leagueoflils.eth): 1 = For, 2 = Against, 3 = Abstain
+        // Convert to Nouns format: 0 = Against, 1 = For, 2 = Abstain
+        choice: vote.choice === 1 ? 1 : vote.choice === 2 ? 0 : 2,
         vp: vote.vp,
         voter: vote.voter,
         reason: vote.reason,
@@ -1542,9 +1544,10 @@ function CombinedVotesList({ combinedVotes }: { combinedVotes: any[] }) {
 function CombinedVoteRow({ vote }: { vote: any }) {
   if (vote.combined) {
     // Same voter voted in both with same direction
-    const choiceLabel = vote.choice === 1 ? 'for' : vote.choice === 2 ? 'against' : 'abstain';
-    const choiceColor = vote.choice === 1 ? 'text-semantic-positive' : 
-                        vote.choice === 2 ? 'text-semantic-negative' : 
+    // Nouns format: 0 = Against, 1 = For, 2 = Abstain
+    const choiceLabel = vote.choice === 1 ? 'for' : vote.choice === 0 ? 'against' : 'abstain';
+    const choiceColor = vote.choice === 1 ? 'text-semantic-positive' :
+                        vote.choice === 0 ? 'text-semantic-negative' :
                         'text-content-secondary';
     
     return (
@@ -1587,9 +1590,10 @@ function CombinedVoteRow({ vote }: { vote: any }) {
 }
 
 function ProposalVoteRow({ vote, isNouns }: { vote: any; isNouns: boolean }) {
-  const choiceLabel = vote.choice === 1 ? 'for' : vote.choice === 2 ? 'against' : 'abstain';
-  const choiceColor = vote.choice === 1 ? 'text-semantic-positive' : 
-                      vote.choice === 2 ? 'text-semantic-negative' : 
+  // Nouns format: 0 = Against, 1 = For, 2 = Abstain
+  const choiceLabel = vote.choice === 1 ? 'for' : vote.choice === 0 ? 'against' : 'abstain';
+  const choiceColor = vote.choice === 1 ? 'text-semantic-positive' :
+                      vote.choice === 0 ? 'text-semantic-negative' :
                       'text-content-secondary';
   
   const voterAddress = isNouns ? vote.voterAddress : vote.voter;
@@ -1667,10 +1671,10 @@ function SnapshotVotesList({
   );
 }
 function SnapshotVoteRow({ vote }: { vote: SnapshotVoteType & { nounIds: string[]; nounCount: number } }) {
+  // Snapshot (leagueoflils.eth): 1 = For, 2 = Against, 3 = Abstain
   const choiceLabel = vote.choice === 1 ? 'for' : vote.choice === 2 ? 'against' : 'abstain';
-  const choiceColor = vote.choice === 1 ? 'text-semantic-positive' : 
-                      vote.choice === 2 ? 'text-semantic-negative' : 
-                      'text-content-secondary';
+  const choiceColor = vote.choice === 1 ? 'text-semantic-positive' :
+                      vote.choice === 2 ? 'text-semantic-negative' : 'text-content-secondary';
 
   return (
     <div className="flex gap-4">

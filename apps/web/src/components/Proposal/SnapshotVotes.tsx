@@ -25,6 +25,7 @@ export function SnapshotVotes({ snapshotProposal }: SnapshotVotesProps) {
     );
   }
 
+  // For leagueoflils.eth Snapshot: 1 = For, 2 = Against, 3 = Abstain
   const forVotes = votes.filter(v => v.choice === 1);
   const againstVotes = votes.filter(v => v.choice === 2);
   const abstainVotes = votes.filter(v => v.choice === 3);

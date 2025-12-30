@@ -22,7 +22,7 @@ export interface SnapshotProposal {
 export interface SnapshotVote {
   voter: string;
   vp: number;
-  choice: number; // 1 = For, 2 = Against, 3 = Abstain
+  choice: number; // For leagueoflils.eth: 1 = For, 2 = Against, 3 = Abstain
   reason?: string;
 }
 

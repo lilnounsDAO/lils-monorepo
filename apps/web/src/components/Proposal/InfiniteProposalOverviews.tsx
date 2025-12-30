@@ -93,16 +93,34 @@ export default function InfiniteProposalOverviews({
   const proposalsToDisplay = enableMetagov ? metagovProposals.map(mp => mp.daoProposal) : allProposals;
   const metagovMap = new Map(metagovProposals.map(mp => [mp.daoProposal.id, mp]));
 
-  // Categorize proposals - use DAO state, not metagov combined state
+  // Categorize proposals - use metagov state for Nouns DAO to prioritize Snapshot voting
   const { activeProposals, upcomingProposals, pastProposals } = useMemo(() => {
-    // Filter by DAO proposal state (not metagov combined state)
+    // For Nouns DAO: Use metagov state to determine Active (Snapshot vote is what matters for metagov)
+    // For Lil Nouns: Use DAO state as normal
     const active = proposalsToDisplay.filter((p) => {
-      // Check DAO state, not metagov state
       const daoState = p.state;
+
+      // For Nouns DAO, check if Snapshot vote is active
+      if (enableMetagov) {
+        const metagov = metagovMap.get(p.id);
+        if (metagov?.combinedState === "metagov_active") {
+          return true; // Snapshot vote is active, show in Active section
+        }
+      }
+
       return daoState === "active";
     });
     const upcoming = proposalsToDisplay.filter((p) => {
       const daoState = p.state;
+
+      // For Nouns DAO, don't show as upcoming if Snapshot is active
+      if (enableMetagov) {
+        const metagov = metagovMap.get(p.id);
+        if (metagov?.combinedState === "metagov_active") {
+          return false; // Already shown in Active section
+        }
+      }
+
       return daoState === "pending" || daoState === "updatable";
     });
     const past = proposalsToDisplay.filter((p) => {
