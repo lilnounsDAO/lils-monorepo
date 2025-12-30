@@ -1,5 +1,6 @@
 # API routes - must come before SPA fallback
-/api/discord/events    /.netlify/functions/api/discord/events    200
+# Netlify converts function paths: apps/web/functions/api/discord/events.js -> api-discord-events
+/api/discord/events    /.netlify/functions/api-discord-events    200
 
 # External redirects
 /discord	https://discord.gg/QdEVmGv7Yu	302
