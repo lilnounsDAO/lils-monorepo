@@ -37,6 +37,7 @@ const MENU_SECTIONS = {
   ],
   DAO: [
     { label: "Auction", href: "/", isAuction: true },
+    { label: "Explore", href: "/explore" },
     { label: "Proposals", href: "/vote" },
     { label: "Candidates", href: "/candidates" },
     { label: "Discussion topics", href: "/topics" },
