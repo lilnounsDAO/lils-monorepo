@@ -57,4 +57,4 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 [functions]
-  directory = "apps/web/functions"
+  directory = "netlify/functions"
