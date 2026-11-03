@@ -3,6 +3,7 @@ import { NounFilterEngine, FilterCounts, FilterResult, CompactIndexData } from '
 import { useNounFilters } from '@/hooks/useNounFilters';
 import { CHAIN_CONFIG } from '@/config';
 import { GetNounsPaginatedDocument, OrderDirection } from '@/data/generated/ponder/clean-graphql';
+import { getOnchainNouns, usesOnchainData } from '@/data/sepolia/onchain';
 
 interface FilterEngineContextType {
   filterEngine: NounFilterEngine | null;
@@ -41,11 +42,34 @@ export function FilterEngineProvider({ children }: { children: ReactNode }) {
           if (sharedCompactIndex) {
             return sharedCompactIndex;
           }
+          if (usesOnchainData() || !CHAIN_CONFIG.indexerUrl) {
+            sharedCompactIndexPromise = null;
+          }
           if (sharedCompactIndexPromise) {
             return sharedCompactIndexPromise;
           }
 
           sharedCompactIndexPromise = (async (): Promise<CompactIndexData> => {
+            if (usesOnchainData() || !CHAIN_CONFIG.indexerUrl) {
+              const onchainNouns = await getOnchainNouns();
+              const nounIds = onchainNouns.map((noun) => noun.id);
+              const seeds = onchainNouns.map((noun) => [
+                noun.traits.background.seed,
+                noun.traits.body.seed,
+                noun.traits.accessory.seed,
+                noun.traits.head.seed,
+                noun.traits.glasses.seed,
+              ]);
+              const builtCompactIndex: CompactIndexData = {
+                version: '1.0.0',
+                totalCount: onchainNouns.length,
+                nounIds,
+                seedsBase64: btoa(JSON.stringify(seeds)),
+              };
+              sharedCompactIndex = builtCompactIndex;
+              return builtCompactIndex;
+            }
+
             console.log('🚀 Building compact noun index from GraphQL (cache miss)...');
 
             // Fetch all nouns in batches to build compact index

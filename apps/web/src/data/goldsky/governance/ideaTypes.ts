@@ -55,6 +55,7 @@ export interface FeedbackPost {
         id: string;
       };
       reason: string | null;
+      support?: number | null;
     };
     reply: string;
   }>;

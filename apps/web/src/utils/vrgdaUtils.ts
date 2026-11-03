@@ -1,19 +1,28 @@
-import { detectChainFromHostname } from "./networkDetection";
-import { sepolia } from "viem/chains";
+import { isSepoliaNetwork } from "./networkDetection";
+import { CHAIN_CONFIG } from "@/config";
+import { isConfiguredAddress } from "@/data/auction/getOnchainAuction";
+import { getCachedMinterMode } from "@/data/sepolia/onchain";
 
 export const FIRST_VRGDA_NOUN_ID = 7983;
-export const FIRST_VRGDA_NOUN_ID_SEPOLIA = 0; // On Sepolia, VRGDA starts at noun 1
+export const FIRST_VRGDA_NOUN_ID_SEPOLIA = 0;
+
+export function hasLilVrgda(): boolean {
+  return isConfiguredAddress(CHAIN_CONFIG.addresses.lilVRGDAProxy);
+}
+
+export function isSepoliaVrgdaMode(): boolean {
+  if (!isSepoliaNetwork()) return false;
+  const mode = getCachedMinterMode();
+  if (mode) return mode === "vrgda";
+  return hasLilVrgda();
+}
 
 export function isVRGDANoun(nounId: number): boolean {
-  // On Sepolia, all nouns are VRGDA nouns (starting from 1)
-  // On Mainnet, VRGDA starts at 7983
-  const chainId = detectChainFromHostname();
-  const isSepolia = chainId === sepolia.id;
-  
-  if (isSepolia) {
-    return nounId >= FIRST_VRGDA_NOUN_ID_SEPOLIA;
+  if (isSepoliaNetwork()) {
+    // Sepolia sale UI is chosen from token.minter() (AH vs VRGDA), not noun id.
+    return false;
   }
-  
+
   return nounId >= FIRST_VRGDA_NOUN_ID;
 }
 

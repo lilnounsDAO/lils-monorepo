@@ -21,7 +21,15 @@ export default function FilteredSortedCandidateFeedback({
   const { sortValue } = useSortContext();
 
   const filteredSortedFeedback = useMemo(() => {
+    const replyOnlyIds = new Set(
+      feedbackPosts.flatMap((feedback) =>
+        (feedback.voteReplies ?? []).map((vr) => vr.replyVote.id)
+      )
+    );
     const filtered = [...feedbackPosts].filter((feedback) => {
+      if (replyOnlyIds.has(feedback.id) && !(feedback.reason ?? "").trim()) {
+        return false;
+      }
       return (
         (feedback.reason ?? "")
           .toLowerCase()

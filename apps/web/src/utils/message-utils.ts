@@ -189,6 +189,11 @@ export const messageUtils = {
       const text = extractText(node).trim()
       const type = node.type || 'paragraph'
 
+      if (type === 'image' && node.url) {
+        const caption = typeof node.caption === 'string' ? node.caption : ''
+        return `![${caption}](${node.url})\n\n`
+      }
+
       switch (type) {
         case 'heading-one':
           return text ? `# ${text}\n\n` : ''

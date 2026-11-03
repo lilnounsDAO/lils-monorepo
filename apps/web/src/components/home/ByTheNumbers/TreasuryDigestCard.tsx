@@ -1,18 +1,17 @@
 import React from "react";
-//
 import NumberFlow from "@number-flow/react";
+import { useTreasuryData } from "@/hooks/useTreasuryData";
 
 type TreasuryDigestCardProps = {
   className?: string;
-  treasuryDeployedUsd: number;
-  treasuryBalanceInUsd: number;
 };
 
 export const TreasuryDigestCard: React.FC<TreasuryDigestCardProps> = ({
   className = "",
-  treasuryDeployedUsd,
-  treasuryBalanceInUsd,
 }) => {
+  const { data } = useTreasuryData();
+  const treasuryBalanceInUsd = data?.totalUsd ?? 0;
+
   return (
     <div
       className={`w-full h-full rounded-[16px] bg-[#F1F4F9] ${className} overflow-hidden`}

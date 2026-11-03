@@ -48,6 +48,14 @@ export function isMainnetNetwork(): boolean {
   return detectChainFromHostname() === mainnet.id;
 }
 
+/** localhost pointed at mainnet, not sepolia.localhost. */
+export function isLocalMainnetHost(): boolean {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname
+  if (host !== 'localhost' && host !== '127.0.0.1') return false
+  return detectChainFromHostname() === mainnet.id
+}
+
 /**
  * Returns the network name as a string for display purposes
  */

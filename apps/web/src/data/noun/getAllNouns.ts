@@ -1,5 +1,6 @@
 
 import { CHAIN_CONFIG } from "@/config";
+import { getOnchainNouns, usesOnchainData } from "@/data/sepolia/onchain";
 import { graphql } from "../generated/gql";
 import { graphQLFetchWithFallback } from "../utils/graphQLFetch";
 import { Noun } from "./types";
@@ -81,6 +82,10 @@ const runPaginatedNounsQuery = unstable_cache(
 );
 
 export async function getAllNounsUncached(): Promise<Noun[]> {
+  if (usesOnchainData()) {
+    return getOnchainNouns();
+  }
+
   const queryResponse = await runPaginatedNounsQueryUncached();
   let nouns = queryResponse.map(transformQueryNounToNoun);
 
@@ -97,6 +102,10 @@ export async function getAllNounsUncached(): Promise<Noun[]> {
 
 // Memory-optimized version that fetches only recent Nouns for initial load
 export async function getRecentNouns(limit: number = 200): Promise<Noun[]> {
+  if (usesOnchainData()) {
+    return (await getOnchainNouns()).slice(0, limit);
+  }
+
   try {
     const response = await fetch(CHAIN_CONFIG.indexerUrl, {
       method: 'POST',
@@ -167,6 +176,12 @@ export async function getAllNounsComplete(
 ): Promise<{ nouns: Noun[], totalCount: number }> {
   console.log('🔍 PERFORMANCE TEST: Fetching ALL nouns (no limit)...');
   const overallStart = performance.now();
+
+  if (usesOnchainData()) {
+    const nouns = await getOnchainNouns();
+    const ordered = sortOrder === "oldest" ? [...nouns].reverse() : nouns;
+    return { nouns: ordered, totalCount: ordered.length };
+  }
   
   try {
     const orderDirection = sortOrder === "newest" ? OrderDirection.Desc : OrderDirection.Asc;
@@ -275,6 +290,11 @@ export async function getAllNounsComplete(
 export async function getAllNounsForFiltering(): Promise<{ nouns: Noun[], totalCount: number }> {
   console.log('🔍 PERFORMANCE TEST: Fetching all nouns (limit 1000)...');
   const overallStart = performance.now();
+
+  if (usesOnchainData()) {
+    const nouns = await getOnchainNouns();
+    return { nouns, totalCount: nouns.length };
+  }
   
   try {
     // Fetch all nouns with a high limit for filtering
@@ -364,6 +384,18 @@ export async function getNounsWithCursor(
 ): Promise<{ nouns: Noun[], hasNextPage: boolean, endCursor?: string }> {
   console.log('🔍 getNounsWithCursor called with:', { first, after, orderDirection });
 
+  if (usesOnchainData()) {
+    const all = await getOnchainNouns();
+    const ordered = orderDirection === OrderDirection.Asc ? [...all].reverse() : all;
+    const start = after ? parseInt(after) || 0 : 0;
+    const nouns = ordered.slice(start, start + first);
+    return {
+      nouns,
+      hasNextPage: start + first < ordered.length,
+      endCursor: (start + nouns.length).toString(),
+    };
+  }
+
   try {
     const response = await fetch(CHAIN_CONFIG.indexerUrl, {
       method: 'POST',
@@ -442,6 +474,13 @@ export async function getNounsWithOffset(
   orderDirection: OrderDirection = OrderDirection.Desc
 ): Promise<{ nouns: Noun[], hasNextPage: boolean }> {
   console.log('🔍 getNounsWithOffset called with:', { offset, limit, orderDirection });
+
+  if (usesOnchainData()) {
+    const all = await getOnchainNouns();
+    const ordered = orderDirection === OrderDirection.Asc ? [...all].reverse() : all;
+    const nouns = ordered.slice(offset, offset + limit);
+    return { nouns, hasNextPage: offset + limit < ordered.length };
+  }
 
   try {
     const response = await fetch(CHAIN_CONFIG.indexerUrl, {
@@ -526,6 +565,26 @@ export async function getCompactNounsWithOffset(
 ): Promise<{ nouns: CompactNoun[], hasNextPage: boolean }> {
   console.log('🔍 getCompactNounsWithOffset called with:', { offset, limit, orderDirection });
 
+  if (usesOnchainData()) {
+    const all = await getOnchainNouns();
+    const ordered = orderDirection === OrderDirection.Asc ? [...all].reverse() : all;
+    const slice = ordered.slice(offset, offset + limit);
+    return {
+      nouns: slice.map((noun) => ({
+        id: noun.id,
+        seed: [
+          noun.traits.background.seed,
+          noun.traits.body.seed,
+          noun.traits.accessory.seed,
+          noun.traits.head.seed,
+          noun.traits.glasses.seed,
+        ],
+        createdAt: "0",
+      })),
+      hasNextPage: offset + limit < ordered.length,
+    };
+  }
+
   try {
     const response = await fetch(CHAIN_CONFIG.indexerUrl, {
       method: 'POST',
@@ -590,6 +649,16 @@ export async function getNounsPaginated(
   pageSize: number = 100
 ): Promise<{ nouns: Noun[], hasMore: boolean, totalCount?: number }> {
   console.log('🔍 getNounsPaginated called with:', { page, pageSize });
+
+  if (usesOnchainData()) {
+    const all = await getOnchainNouns();
+    const offset = page * pageSize;
+    return {
+      nouns: all.slice(offset, offset + pageSize),
+      hasMore: offset + pageSize < all.length,
+      totalCount: all.length,
+    };
+  }
   
   const offset = page * pageSize;
   const limit = pageSize + 1; // Fetch one extra to check if there are more
@@ -677,6 +746,14 @@ export async function getNounsBatch(
   startId: number,
   endId: number
 ): Promise<Noun[]> {
+  if (usesOnchainData()) {
+    const nouns = await getOnchainNouns();
+    return nouns.filter((noun) => {
+      const nounId = parseInt(noun.id);
+      return nounId >= startId && nounId <= endId;
+    });
+  }
+
   // Use existing query for batch fetching with ID range
   const batchSize = Math.min(endId - startId + 1, 1000);
   const skip = Math.max(0, startId);

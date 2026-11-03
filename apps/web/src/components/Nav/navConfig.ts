@@ -6,40 +6,47 @@ export interface NavItem {
   icon: IconType;
   href: string;
   new?: boolean;
+  children?: NavItem[];
 }
 
 export interface NavProps {
   items: NavItem[];
 }
 
+// Digest, and the governance dropdown that opened it, stay out of the nav
+// until that feed is indexed, cached, and stored on the VPS.
 const ALL_DESKTOP_NAV_ITEMS: NavItem[] = [
   { name: "Explore", icon: "layers", href: "/explore" },
-  { name: "Vote", icon: "vote", href: "/vote" },
-  // { name: "Stats", icon: "stats", href: "/stats" },
-  { name: "Ideas", icon: "vote", href: "/candidates" },
-  { name: "Topics", icon: "lightning", href: "/topics" },
+  { name: "Governance", icon: "clock", href: "/vote" },
   { name: "Learn", icon: "book", href: "/learn" },
 ];
 
 const ALL_MOBILE_NAV_ITEMS: NavItem[] = [
   { name: "Home", icon: "home", href: "/" },
   { name: "Explore", icon: "layers", href: "/explore" },
-  { name: "Vote", icon: "vote", href: "/vote" },
-  { name: "Ideas", icon: "lightning", href: "/candidates" },
+  { name: "Governance", icon: "vote", href: "/vote" },
   { name: "Learn", icon: "book", href: "/learn" },
-  // { name: "Stats", icon: "stats", href: "/stats" },
 ];
 
-// Filter nav items based on DAO version
-// Hide topics and ideas (candidates) if not version 5
-export const DESKTOP_NAV_ITEMS: NavItem[] = isDaoVersion5()
-  ? ALL_DESKTOP_NAV_ITEMS
-  : ALL_DESKTOP_NAV_ITEMS.filter(
-      (item) => item.href !== "/topics" && item.href !== "/candidates"
-    );
+function filterGovernanceChildren(item: NavItem): NavItem {
+  if (!item.children) return item;
+  if (isDaoVersion5()) return item;
+  return {
+    ...item,
+    children: item.children.filter(
+      (child) => child.href !== "/topics" && child.href !== "/candidates",
+    ),
+  };
+}
 
-export const MOBILE_NAV_ITEMS: NavItem[] = isDaoVersion5()
-  ? ALL_MOBILE_NAV_ITEMS
-  : ALL_MOBILE_NAV_ITEMS.filter(
-      (item) => item.href !== "/topics" && item.href !== "/candidates"
-    );
+export const DESKTOP_NAV_ITEMS: NavItem[] =
+  ALL_DESKTOP_NAV_ITEMS.map(filterGovernanceChildren);
+
+export const MOBILE_NAV_ITEMS: NavItem[] = ALL_MOBILE_NAV_ITEMS;
+
+export const GOVERNANCE_HREFS = [
+  "/digest",
+  "/vote",
+  "/candidates",
+  "/topics",
+];

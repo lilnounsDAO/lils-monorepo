@@ -26,6 +26,7 @@ import VRGDAExplorePage from './pages/VRGDAExplorePage'
 import LearnPage from './pages/LearnPage'
 import NotFoundPage from './pages/NotFoundPage'
 import ProposalEditorScreen from './components/ProposalEditor/ProposalEditorScreen'
+import SharedDraftPage from './components/ProposalEditor/SharedDraftPage'
 
 // Styles
 import '@rainbow-me/rainbowkit/styles.css'
@@ -33,6 +34,7 @@ import TopicDetailPage from './pages/TopicDetailPage'
 import ProfilesPage from './pages/ProfilesPage'
 import TraitsPage from './pages/TraitsPage'
 import BrandPage from './pages/BrandPage'
+import ContractsPage from './pages/ContractsPage'
 
 function NounsDaoRedirect() {
   const { id } = useParams<{ id: string }>()
@@ -100,6 +102,7 @@ function App() {
               <Route path="explore" element={<ExplorePage />} />
               <Route path="profile" element={<ProposalsPage />} />
               <Route path="profile/:address" element={<ProposalsPage />} />
+              <Route path="digest" element={<Navigate to="/vote" replace />} />
               <Route path="vote" element={<VotePage />} />
               <Route path="vote/nouns" element={<VotePage />} />
               <Route path="vote/nounsdao" element={<VotePage />} />
@@ -118,8 +121,10 @@ function App() {
               <Route path="vrgda/explore" element={<VRGDAExplorePage />} />
               <Route path="traits" element={<TraitsPage />} />
               <Route path="brand" element={<BrandPage />} />
+              <Route path="contracts" element={<ContractsPage />} />
              
              {/* Proposal Editor */}
+              <Route path="draft/:draftId" element={<SharedDraftPage />} />
               <Route path="new" element={<ProposalEditorScreen />} />
               <Route path="new/proposal" element={<ProposalEditorScreen />} />
               <Route path="new/candidate" element={<ProposalEditorScreen />} />

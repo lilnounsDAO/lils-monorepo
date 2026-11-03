@@ -6,7 +6,7 @@ import NounDialog from '@/components/dialog/NounDialog'
 
 export default function MainLayout() {
   const location = useLocation()
-  const isEditorPage = location.pathname.includes('/new') || location.pathname.includes('/update')
+  const isEditorPage = location.pathname.includes('/new') || location.pathname.includes('/update') || location.pathname.startsWith('/draft')
   
   if (isEditorPage) {
     // Scroll container pattern for /new pages (proposal editor)

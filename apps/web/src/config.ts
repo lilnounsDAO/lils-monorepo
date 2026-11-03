@@ -301,15 +301,16 @@ export const CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
   [sepolia.id]: {
     chain: sepolia,
     rpcUrl: {
-      primary: `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY!}`,
-      fallback: `https://sepolia.infura.io/v3/${import.meta.env.VITE_INFURA_API_KEY!}`,
+      primary: "https://sepolia.gateway.tenderly.co",
+      fallback: "https://ethereum-sepolia-rpc.publicnode.com",
     },
     publicClient: createPublicClient({
       chain: sepolia,
       transport: fallback([
-        http(
-          `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY!}`,
-        ),
+        // publicnode caps eth_call well below the ~28M gas tokenURI needs
+        http("https://sepolia.gateway.tenderly.co"),
+        http("https://1rpc.io/sepolia"),
+        http("https://ethereum-sepolia-rpc.publicnode.com"),
         http(
           `https://sepolia.infura.io/v3/${import.meta.env.VITE_INFURA_API_KEY!}`,
         ),
@@ -357,14 +358,26 @@ export const CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
     },
     nounsGovernanceUrl: "https://sepolia.lilnouns.wtf/",
     subgraphUrl: {
-      primary: `https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia/0.1.17/gn`,
-      fallback: `https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia/0.1.17/gn`,
+      primary: (
+        import.meta.env.VITE_SEPOLIA_SUBGRAPH_URL ||
+        "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia-rehearsal/0.1.4/gn"
+      ).trim(),
+      fallback: (
+        import.meta.env.VITE_SEPOLIA_SUBGRAPH_URL ||
+        "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia-rehearsal/0.1.4/gn"
+      ).trim(),
     },
     goldskyUrl: {
-      primary: "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia/0.1.17/gn",
-      fallback: "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia/0.1.17/gn",
+      primary: (
+        import.meta.env.VITE_SEPOLIA_SUBGRAPH_URL ||
+        "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia-rehearsal/0.1.4/gn"
+      ).trim(),
+      fallback: (
+        import.meta.env.VITE_SEPOLIA_SUBGRAPH_URL ||
+        "https://api.goldsky.com/api/public/project_cldjvjgtylso13swq3dre13sf/subgraphs/lil-nouns-sepolia-rehearsal/0.1.4/gn"
+      ).trim(),
     },
-    indexerUrl: import.meta.env.VITE_INDEXER_URL!, // mainnet for now, didn't deploy for sepolia yet
+    indexerUrl: "",
     swapForWrappedNativeUrl: "",
     daoParams: {
       votingPeriod: 20,
@@ -373,15 +386,16 @@ export const CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
       lastMinuteWindowBlocks: 100,
       objectionPeriodBlocks: 500,
       updatablePeriodBlocks: 300,
-      minQuorumBPS: 1000,
-      maxQuorumBPS: 4000,
-      quorumCoefficient: 10000,
+      minQuorumBPS: 500,
+      maxQuorumBPS: 1500,
+      quorumCoefficient: 1000000,
     },
     dataContractFees: {
-      createCandidateCost: BigInt("10000000000000000"), // 0.01 ETH
-      updateCandidateCost: BigInt("10000000000000000"), // 0.01 ETH
-      createTopicCost: BigInt("20000000000000000"), // 0.02 ETH
-      feeRecipient: getAddress("0xE54f098b1880C536e0083720922b8a365FB403DC"),
+      // Live DAOData V2 was initialized at 1 wei (not the 0.01 ETH mainnet defaults)
+      createCandidateCost: BigInt(1),
+      updateCandidateCost: BigInt(1),
+      createTopicCost: BigInt(1),
+      feeRecipient: getAddress(sepoliaAddresses.nounsDAOExecutor),
     },
   },
 };

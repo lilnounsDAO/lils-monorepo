@@ -69,7 +69,7 @@ export const lilVrgdaAbi = [
  */
 export const lilVrgdaAddress = {
   1: '0xA2587b1e2626904c8575640512b987Bd3d3B592D',
-  11155111: '0x080A01A9163186102946c429B89b0c4dcF84159C',
+  11155111: '0x0000000000000000000000000000000000000000',
 } as const
 
 /**
@@ -650,7 +650,7 @@ export const nounsAuctionHouseAbi = [
  */
 export const nounsAuctionHouseAddress = {
   1: '0x55e0F7A3bB39a28Bd7Bcc458e04b3cF00Ad3219E',
-  11155111: '0x0000000000000000000000000000000000000000',
+  11155111: '0x3707b0834728f3eCE3b5f5Ba4Abe1a0788Ef12fC',
 } as const
 
 /**
@@ -1157,7 +1157,7 @@ export const nounsDaoDataAbi = [
  */
 export const nounsDaoDataAddress = {
   1: '0x0000000000000000000000000000000000000000',
-  11155111: '0x6CaC39a113A498e5C82B31b466299f080aeD4F6F',
+  11155111: '0x0000000000000000000000000000000000000000',
 } as const
 
 /**
@@ -2283,7 +2283,7 @@ export const nounsDaoLogicAbi = [
  */
 export const nounsDaoLogicAddress = {
   1: '0x5d2C31ce16924C2a71D317e5BbFd5ce387854039',
-  11155111: '0xb73613d288F5d69EbBde6d3B129f91D1F53c28B2',
+  11155111: '0x204b38EF237fb3C1433313cA2b0f69F40Fda142F',
 } as const
 
 /**
@@ -2357,7 +2357,7 @@ export const nounsNftTokenAbi = [
  */
 export const nounsNftTokenAddress = {
   1: '0x4b10701Bfd7BFEdc47d50562b76b436fbB5BdB3B',
-  11155111: '0x94319212eff19b15A27F20cCa145eB43B6b92bdA',
+  11155111: '0x1bCcE5eC2A785E7e9807766c4dbB72aB4a0014Cf',
 } as const
 
 /**

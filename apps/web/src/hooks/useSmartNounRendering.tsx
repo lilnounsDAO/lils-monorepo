@@ -8,6 +8,7 @@ import { CHAIN_CONFIG } from '@/config';
 import { GetNounsPaginatedDocument, OrderDirection } from '@/data/generated/ponder/clean-graphql';
 import { transformVpsNounToNoun } from '@/data/noun/helpers';
 import { useNounFilters } from '@/hooks/useNounFilters';
+import { getOnchainNounsByIds, usesOnchainData } from '@/data/sepolia/onchain';
 
 // GraphQL query to fetch nouns by specific IDs
 const GetNounsByIdsDocument = `
@@ -186,6 +187,20 @@ export function useSmartNounRendering(
 
         console.log('📊 Fetching first', idsToFetch.length, 'nouns');
 
+        if (usesOnchainData() || !CHAIN_CONFIG.indexerUrl) {
+          const fetchedNouns = await getOnchainNounsByIds(idsToFetch);
+          const entities = new Map<string, Noun>();
+          const ids: string[] = [];
+          for (const noun of fetchedNouns) {
+            entities.set(noun.id, noun);
+            ids.push(noun.id);
+          }
+          setNounEntities(entities);
+          setNounIds(ids);
+          setCurrentOffset(BATCH_SIZE);
+          return;
+        }
+
         const response = await fetch(CHAIN_CONFIG.indexerUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -262,6 +277,18 @@ export function useSmartNounRendering(
       const idsToFetch = matchingNounIds.slice(currentOffset, currentOffset + BATCH_SIZE);
 
       console.log('📊 Fetching next', idsToFetch.length, 'nouns');
+
+      if (usesOnchainData() || !CHAIN_CONFIG.indexerUrl) {
+        const fetchedNouns = await getOnchainNounsByIds(idsToFetch);
+        setNounEntities((prev) => {
+          const next = new Map(prev);
+          for (const noun of fetchedNouns) next.set(noun.id, noun);
+          return next;
+        });
+        setNounIds((prev) => [...prev, ...fetchedNouns.map((noun) => noun.id)]);
+        setCurrentOffset((prev) => prev + BATCH_SIZE);
+        return;
+      }
 
       const response = await fetch(CHAIN_CONFIG.indexerUrl, {
         method: 'POST',

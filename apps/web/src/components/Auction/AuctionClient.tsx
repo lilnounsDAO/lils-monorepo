@@ -59,7 +59,7 @@ export default function AuctionClient() {
   });
 
   const date = useMemo(() => {
-    if (auction?.endTime) {
+    if (auction?.endTime && Number(auction.endTime) > 0) {
       const endTimeMs = Number(auction.endTime) * 1000;
       const endDate = new Date(endTimeMs);
       return new Intl.DateTimeFormat("en-US", {

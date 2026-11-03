@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_INFURA_API_KEY: string
   readonly VITE_DECENTRALIZED_SUBGRAPH_API_KEY: string
   readonly VITE_INDEXER_URL: string
+  /** Goldsky URL for the Sepolia carbon-copy rehearsal subgraph. Empty = read contracts. */
+  readonly VITE_SEPOLIA_SUBGRAPH_URL?: string
   readonly VITE_CHAIN_ID: string
   readonly VITE_URL: string
   readonly VITE_CMS_URL: string
@@ -12,6 +14,7 @@ interface ImportMetaEnv {
   readonly VITE_WHISK_API_KEY: string
   /** Optional JSON-RPC proxy URL (e.g. Cloudflare Worker) so Goldsky secret stays off the client; omit to use Alchemy → Infura only. */
   readonly VITE_RPC_PROXY_URL?: string
+  readonly VITE_SAVED_PROPOSALS_URL?: string
   // Tenderly Configuration
   readonly VITE_TENDERLY_ACCESS_KEY?: string
   readonly VITE_TENDERLY_USERNAME?: string

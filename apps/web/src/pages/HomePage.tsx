@@ -11,6 +11,8 @@ import StartJourney from '@/components/home/StartJourney'
 import LearnAboutNounsDao from '@/components/home/LearnAboutNounsDao'
 import { isVRGDANoun } from '@/utils/vrgdaUtils'
 import { getCurrentAuctionNounId } from '@/data/auction/getCurrentAuctionNounId'
+import { isSepoliaNetwork } from '@/utils/networkDetection'
+import { getMinterMode } from '@/data/sepolia/onchain'
 import JoinCommunity from '@/components/home/JoinCommunity'
 
 const NounspotMap = () =>  {
@@ -45,7 +47,11 @@ export default function HomePage() {
         setCurrentAuctionId(id)
         
         const auctionId = auctionIdParam ?? id
-        const shouldShowVRGDA = auctionId ? isVRGDANoun(parseInt(auctionId)) : false
+        const shouldShowVRGDA = isSepoliaNetwork()
+          ? (await getMinterMode()) === "vrgda"
+          : auctionId
+            ? isVRGDANoun(parseInt(auctionId))
+            : false
         setShowVRGDAPool(shouldShowVRGDA)
       } catch (error) {
         console.error('Failed to fetch current auction:', error)

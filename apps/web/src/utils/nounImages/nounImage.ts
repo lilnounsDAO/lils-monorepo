@@ -97,6 +97,9 @@ export function buildNounImage(
 
   const { parts, background } = getNounData(seed);
   const [bodyPart, accessoryPart, headPart, glassesPart] = parts;
+  if (!bodyPart?.data || !accessoryPart?.data || !headPart?.data || !glassesPart?.data) {
+    throw new Error(`Missing noun part data for seed ${getSeedKey(seed)}`);
+  }
 
   let result: string;
 

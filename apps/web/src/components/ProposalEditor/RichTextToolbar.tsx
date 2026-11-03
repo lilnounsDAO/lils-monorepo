@@ -13,6 +13,51 @@ interface RichTextToolbarProps {
   toggleBlock: (format: string) => void
 }
 
+function FormatButton({
+  active,
+  title,
+  onClick,
+  children,
+  style,
+}: {
+  active: boolean
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+  style?: React.CSSProperties
+}) {
+  return (
+    <button
+      type="button"
+      data-format-control="true"
+      title={title}
+      onClick={onClick}
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={(event) => {
+        if (!active) event.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = active ? 'rgb(219, 234, 254)' : 'transparent'
+      }}
+      style={{
+        padding: '0.35rem',
+        borderRadius: '0.375rem',
+        background: active ? 'rgb(219, 234, 254)' : 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        color: active ? 'rgb(29, 78, 216)' : 'rgb(75, 75, 75)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'background-color 0.2s, color 0.2s',
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 const RichTextToolbar: React.FC<RichTextToolbarProps> = ({
   onInsertLink,
   onInsertImage,
@@ -59,184 +104,62 @@ const RichTextToolbar: React.FC<RichTextToolbarProps> = ({
   return (
     <div style={{
       display: 'flex',
+      flexWrap: 'wrap',
       alignItems: 'center',
-      gap: '0.5rem',
+      gap: '0.25rem',
       background: 'transparent',
       padding: '0.3rem'
     }}>
-      {/* Bold */}
-      <button
-        type="button"
-        style={{
-          padding: '0.5rem',
-          borderRadius: '0.375rem',
-          background: isMarkActive('bold') ? 'rgba(0, 0, 0, 0.1)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'rgb(75, 75, 75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background-color 0.2s'
-        }}
-        onClick={() => toggleMark('bold')}
-        onMouseDown={(e) => e.preventDefault()}
-        onMouseEnter={(e) => {
-          if (!isMarkActive('bold')) {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isMarkActive('bold')) {
-            e.currentTarget.style.background = 'transparent'
-          }
-        }}
-        title="Bold (⌘B)"
-      >
+      <FormatButton active={isMarkActive('bold')} title="Bold (⌘B)" onClick={() => toggleMark('bold')}>
         <Bold style={{ width: '1rem', height: '1rem' }} />
-      </button>
+      </FormatButton>
 
-      {/* Italic */}
-      <button
-        type="button"
-        style={{
-          padding: '0.5rem',
-          borderRadius: '0.375rem',
-          background: isMarkActive('italic') ? 'rgba(0, 0, 0, 0.1)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'rgb(75, 75, 75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background-color 0.2s'
-        }}
-        onClick={() => toggleMark('italic')}
-        onMouseDown={(e) => e.preventDefault()}
-        onMouseEnter={(e) => {
-          if (!isMarkActive('italic')) {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isMarkActive('italic')) {
-            e.currentTarget.style.background = 'transparent'
-          }
-        }}
-        title="Italic (⌘I)"
-      >
+      <FormatButton active={isMarkActive('italic')} title="Italic (⌘I)" onClick={() => toggleMark('italic')}>
         <Italic style={{ width: '1rem', height: '1rem' }} />
-      </button>
+      </FormatButton>
 
-      {/* Heading 1 */}
-      <button
-        type="button"
-        style={{
-          padding: '0.5rem',
-          borderRadius: '0.375rem',
-          background: isBlockActive('heading-one') ? 'rgba(0, 0, 0, 0.1)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'rgb(75, 75, 75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background-color 0.2s',
-          fontSize: '0.875rem',
-          fontWeight: '700'
-        }}
-        onClick={() => toggleBlock('heading-one')}
-        onMouseDown={(e) => e.preventDefault()}
-        onMouseEnter={(e) => {
-          if (!isBlockActive('heading-one')) {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isBlockActive('heading-one')) {
-            e.currentTarget.style.background = 'transparent'
-          }
-        }}
+      <FormatButton
+        active={isBlockActive('heading-one')}
         title="Heading 1"
+        onClick={() => toggleBlock('heading-one')}
+        style={{ fontSize: '0.875rem', fontWeight: 700 }}
       >
         H1
-      </button>
+      </FormatButton>
 
-      {/* Heading 2 */}
-      <button
-        type="button"
-        style={{
-          padding: '0.5rem',
-          borderRadius: '0.375rem',
-          background: isBlockActive('heading-two') ? 'rgba(0, 0, 0, 0.1)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'rgb(75, 75, 75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background-color 0.2s',
-          fontSize: '0.875rem',
-          fontWeight: '700'
-        }}
-        onClick={() => toggleBlock('heading-two')}
-        onMouseDown={(e) => e.preventDefault()}
-        onMouseEnter={(e) => {
-          if (!isBlockActive('heading-two')) {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isBlockActive('heading-two')) {
-            e.currentTarget.style.background = 'transparent'
-          }
-        }}
+      <FormatButton
+        active={isBlockActive('heading-two')}
         title="Heading 2"
+        onClick={() => toggleBlock('heading-two')}
+        style={{ fontSize: '0.875rem', fontWeight: 700 }}
       >
         H2
-      </button>
+      </FormatButton>
 
       {/* Divider */}
       <div role="separator" style={{
         width: '1px',
         height: '1.5rem',
         backgroundColor: 'rgb(229, 229, 229)',
-        margin: '0 0.5rem'
+        margin: '0 0.15rem'
       }} />
 
-      {/* Link */}
-      <button
-        type="button"
-        style={{
-          padding: '0.5rem',
-          borderRadius: '0.375rem',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'rgb(75, 75, 75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background-color 0.2s'
-        }}
-        onClick={onInsertLink}
-        onMouseDown={(e) => e.preventDefault()}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent'
-        }}
+      <FormatButton
+        active={isMarkActive('link')}
         title="Link"
+        onClick={() => {
+          if (isMarkActive('link')) toggleMark('link')
+          else onInsertLink()
+        }}
       >
         <LinkIcon style={{ width: '1rem', height: '1rem' }} />
-      </button>
+      </FormatButton>
 
       {/* Image */}
       <button
         type="button"
         style={{
-          padding: '0.5rem',
+          padding: '0.35rem',
           borderRadius: '0.375rem',
           background: 'transparent',
           border: 'none',
@@ -249,6 +172,7 @@ const RichTextToolbar: React.FC<RichTextToolbarProps> = ({
         }}
         onClick={onInsertImage}
         onMouseDown={(e) => e.preventDefault()}
+        data-format-control="true"
         onMouseEnter={(e) => {
           e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)'
         }}

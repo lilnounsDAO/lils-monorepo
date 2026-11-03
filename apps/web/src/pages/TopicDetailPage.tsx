@@ -403,6 +403,16 @@ function mapTopicToProposalIdea(topic: Topic): ProposalIdea {
     reason: fb.reason,
     votes: 0,
     createdTimestamp: fb.createdTimestamp,
+    voteReplies: fb.voteReplies?.map((vr) => ({
+      id: vr.replyVote.id,
+      reply: vr.reply,
+      replyVote: {
+        id: vr.replyVote.id,
+        voter: { id: vr.replyVote.voter.id },
+        reason: vr.replyVote.reason ?? null,
+        support: vr.replyVote.support ?? fb.support,
+      },
+    })),
   }));
 
   return {

@@ -7,8 +7,13 @@ import { SECONDS_PER_HOUR } from "@/utils/constants";
 
 // Import VPS-specific GraphQL query
 import { GetNounByIdDocument } from "../generated/ponder/clean-graphql";
+import { getOnchainNounById, usesOnchainData } from "@/data/sepolia/onchain";
 
 export async function getNounByIdUncached(id: string): Promise<Noun | undefined> {
+  if (usesOnchainData() || !CHAIN_CONFIG.indexerUrl) {
+    return getOnchainNounById(id);
+  }
+
   console.log("getNounByIdUncached - using VPS indexer for ID:", id);
   console.log("VPS Indexer URL:", CHAIN_CONFIG.indexerUrl);
   

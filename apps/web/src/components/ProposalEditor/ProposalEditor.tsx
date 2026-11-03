@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useContext, useRef, useCallback } from 'react'
 import { Descendant, Node } from 'slate'
-import RichTextEditor from './RichTextEditor'
+import RichTextEditor, { createEmptyParagraphElement } from './RichTextEditor'
 import ActionDialog from './ActionDialog'
 import SubmissionDialog from './SubmissionDialog'
 import { Button } from '@/components/ui/button'
 import type { Action } from '@/types/proposal-editor'
-import { Plus, ChevronDown, ChevronUp, Copy } from 'lucide-react'
-import { useAccount } from 'wagmi'
+import { Plus, ChevronDown, ChevronUp, Copy, ClipboardPaste, Save, Trash2 } from 'lucide-react'
+import { useAccount, useSignMessage } from 'wagmi'
 import { useEnsResolution } from '@/hooks/useEnsResolution'
 import { isAddress, parseEther, parseUnits } from 'viem'
 import { useTenderlySimulation } from '@/hooks/useTenderlySimulation'
@@ -21,6 +21,42 @@ import { messageUtils } from '@/utils/message-utils'
 import { ToastContext, ToastType } from '@/providers/toast'
 import { useNavigate } from 'react-router-dom'
 import { isDaoVersion5 } from '@/utils/daoVersion'
+import { markdownToDescendants, parsePastedProposal } from '@/utils/parsePastedProposal'
+import {
+  formatEditorDraftTime,
+  loadEditorDrafts,
+  newEditorDraftId,
+  removeEditorDraft,
+  upsertEditorDraft,
+  type EditorDraft,
+} from '@/utils/editorDrafts'
+import { DraftComposer, DraftThread } from './DraftDiscussion'
+import {
+  addSavedProposalCollaborator,
+  addSavedProposalComment,
+  commentCanonical,
+  createSavedProposal,
+  decideSavedProposalComment,
+  decisionCanonical,
+  deleteSavedProposal,
+  getSavedProposal,
+  inviteKey,
+  listSavedProposals,
+  openSavedProposalSession,
+  personLabel,
+  proposalCanonical,
+  readSavedProposalSession,
+  removeSavedProposalCollaborator,
+  replyCanonical,
+  replyToSavedProposalComment,
+  sha256Hex,
+  signableMessage,
+  updateSavedProposal,
+  type SavedProposal,
+  type SavedProposalAccess,
+  type SavedProposalComment,
+  type SavedProposalSummary,
+} from '@/data/savedProposals'
 
 interface ProposalEditorProps {
   title: string
@@ -49,6 +85,9 @@ interface ProposalEditorProps {
   // Internal edit mode state (when used as a standalone component)
   candidateId?: string
   proposalId?: string
+  openedShared?: SavedProposal | null
+  initialDraftId?: string | null
+  enableDrafts?: boolean
 }
 
 const ProposalEditor: React.FC<ProposalEditorProps> = ({
@@ -71,8 +110,12 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
   editData,
   candidateId,
   proposalId,
+  openedShared = null,
+  initialDraftId = null,
+  enableDrafts = true,
 }) => {
   const { address } = useAccount()
+  const { signMessageAsync } = useSignMessage()
   const { addToast } = useContext(ToastContext)
   const navigate = useNavigate()
   const isVersion5 = isDaoVersion5()
@@ -84,7 +127,36 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [resolvedAddresses, setResolvedAddresses] = useState<Record<string, string>>({})
   const [expandedActions, setExpandedActions] = useState<Set<number>>(new Set())
   const [copiedActions, setCopiedActions] = useState(false)
+  const [pastedProposal, setPastedProposal] = useState(false)
+  const [drafts, setDrafts] = useState<EditorDraft[]>(() => loadEditorDrafts())
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(initialDraftId)
+  const [draftJustSaved, setDraftJustSaved] = useState(false)
+  const [sharedProposals, setSharedProposals] = useState<SavedProposalSummary[]>([])
+  const [sharedReady, setSharedReady] = useState(false)
+  const [unlocking, setUnlocking] = useState(false)
+  const [activeShared, setActiveShared] = useState<SavedProposal | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [awaitingWallet, setAwaitingWallet] = useState(false)
+  const [proposalComment, setProposalComment] = useState('')
+  const [inlineComment, setInlineComment] = useState('')
+  const [inlineTarget, setInlineTarget] = useState<{
+    target: 'block' | 'ask'
+    blockIndex: number | null
+    actionIndex: number | null
+    excerpt: string
+  } | null>(null)
+  const [attached, setAttached] = useState<{ owner: 'proposal' | 'inline', action: Action } | null>(null)
+  const [requestDialog, setRequestDialog] = useState<
+    | { mode: 'attach', owner: 'proposal' | 'inline' }
+    | { mode: 'update', commentId: string, action: Action }
+    | null
+  >(null)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [discussionBusy, setDiscussionBusy] = useState<string | null>(null)
+  const [personInput, setPersonInput] = useState('')
+  const [personRole, setPersonRole] = useState<SavedProposalAccess>('comment')
   const titleTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const [formatSlot, setFormatSlot] = useState<HTMLDivElement | null>(null)
 
   // Edit mode state
   const [updateReason, setUpdateReason] = useState(editData?.updateReason || '')
@@ -298,6 +370,669 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
       onActionsChange(newActions)
     }
   }, [mode, onActionsChange])
+
+  const currentMarkdown = messageUtils.descendantsToMarkdown(currentBody as any)
+  const visibleDrafts = drafts.filter((draft) => draft.contentType === contentType)
+  const visibleShared = sharedProposals.filter((proposal) => proposal.contentType === contentType)
+  const activeDraft = visibleDrafts.find((draft) => draft.id === activeDraftId) ?? null
+  const draftSignature = JSON.stringify({
+    title: currentTitle,
+    bodyMarkdown: currentMarkdown,
+    actions: currentActions,
+  })
+  const activeDraftSignature = activeDraft
+    ? JSON.stringify({
+        title: activeDraft.title,
+        bodyMarkdown: activeDraft.bodyMarkdown,
+        actions: activeDraft.actions,
+      })
+    : null
+  const draftDirty = activeDraft ? draftSignature !== activeDraftSignature : false
+  const editorHasWork = currentTitle.trim().length > 0 || currentMarkdown.trim().length > 0 || currentActions.length > 0
+  const [savedBaseline, setSavedBaseline] = useState<string | null>(null)
+  const allowLeaveRef = useRef(false)
+  const matchesSavedDraft = activeDraftSignature !== null && activeDraftSignature === draftSignature
+  const matchesOpenedDraft = savedBaseline !== null && savedBaseline === draftSignature
+  const unsavedChanges = editorHasWork && savedBaseline !== null && !matchesSavedDraft && !matchesOpenedDraft
+
+  useEffect(() => {
+    if (!enableDrafts) return
+    const match = loadEditorDrafts().find((draft) => {
+      if (draft.contentType !== contentType) return false
+      return JSON.stringify({
+        title: draft.title,
+        bodyMarkdown: draft.bodyMarkdown,
+        actions: draft.actions,
+      }) === draftSignature
+    })
+    if (match) setActiveDraftId(match.id)
+    // Match the editor contents once, when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!openedShared) return
+    setActiveShared(openedShared)
+    setActiveDraftId(openedShared.id)
+    setSharedReady(true)
+    handleTitleChange(openedShared.title)
+    handleBodyChange(markdownToDescendants(openedShared.bodyMarkdown))
+    handleActionsChange(openedShared.actions)
+    // Apply the signed-in draft once. Later edits stay in the editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openedShared?.id])
+
+  useEffect(() => {
+    if (!draftJustSaved) return
+    const timeout = window.setTimeout(() => setDraftJustSaved(false), 1500)
+    return () => window.clearTimeout(timeout)
+  }, [draftJustSaved])
+
+  useEffect(() => {
+    if (savedBaseline !== null) return
+    if (mode === 'edit') {
+      const loaded = actualProposalId ? Boolean(proposal) : Boolean(candidate)
+      if (!loaded || !editorHasWork) return
+    }
+    setSavedBaseline(draftSignature)
+  }, [savedBaseline, mode, draftSignature, actualProposalId, proposal, candidate, editorHasWork])
+
+  useEffect(() => {
+    if (!unsavedChanges) return
+    const leaveMessage = 'Leave this page? Save the proposal first if you want to keep what you wrote.'
+    const mark = { ...(window.history.state || {}), lilnounsDraftGuard: true }
+    window.history.pushState(mark, '', window.location.href)
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowLeaveRef.current) return
+      event.preventDefault()
+      event.returnValue = leaveMessage
+    }
+    const onPopState = () => {
+      if (allowLeaveRef.current) return
+      if (window.confirm(leaveMessage)) {
+        allowLeaveRef.current = true
+        window.history.back()
+        return
+      }
+      window.history.pushState(mark, '', window.location.href)
+    }
+    const onClick = (event: MouseEvent) => {
+      if (allowLeaveRef.current || event.defaultPrevented || event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const anchor = (event.target as Element | null)?.closest('a')
+      if (!anchor || anchor.getAttribute('target') === '_blank') return
+      const href = anchor.getAttribute('href')
+      if (!href || href.startsWith('#')) return
+      let url: URL
+      try {
+        url = new URL(anchor.href, window.location.href)
+      } catch {
+        return
+      }
+      if (url.origin !== window.location.origin) return
+      const path = url.pathname
+      if (path === window.location.pathname || path.startsWith('/new') || path.startsWith('/update/')) return
+      if (window.confirm(leaveMessage)) {
+        allowLeaveRef.current = true
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    window.addEventListener('beforeunload', onBeforeUnload)
+    window.addEventListener('popstate', onPopState)
+    document.addEventListener('click', onClick, true)
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      window.removeEventListener('popstate', onPopState)
+      document.removeEventListener('click', onClick, true)
+    }
+  }, [unsavedChanges])
+
+  useEffect(() => {
+    if (!enableDrafts || !address || !readSavedProposalSession(address)) {
+      setSharedProposals([])
+      setSharedReady(false)
+      setActiveShared(null)
+      return
+    }
+    let cancelled = false
+    listSavedProposals(address)
+      .then((result) => {
+        if (cancelled) return
+        setSharedProposals(result.proposals)
+        setSharedReady(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSharedProposals([])
+        setSharedReady(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [address, enableDrafts])
+
+  useEffect(() => {
+    if (!address || !sharedReady || !activeDraftId || activeShared?.id === activeDraftId) return
+    if (!sharedProposals.some((item) => item.id === activeDraftId)) return
+    let cancelled = false
+    getSavedProposal(activeDraftId, address)
+      .then(({ proposal }) => {
+        if (!cancelled) setActiveShared(proposal)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [address, sharedReady, activeDraftId, activeShared?.id, sharedProposals])
+
+  const unlockShared = async () => {
+    if (!address) return
+    setUnlocking(true)
+    try {
+      const digest = await sha256Hex('read')
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('read', '*', digest, timestamp),
+      })
+      await openSavedProposalSession({ digest, signature, address, timestamp })
+      const list = await listSavedProposals(address)
+      setSharedProposals(list.proposals)
+      setSharedReady(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open shared proposals.'
+      const declined = /reject|denied|cancel/i.test(message)
+      addToast?.({
+        content: declined ? 'The wallet declined the signature.' : message,
+        type: ToastType.Failure,
+      })
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
+  const publishDraft = async (draft: EditorDraft): Promise<SavedProposal | null> => {
+    if (!address) {
+      addToast?.({
+        content: 'Saved on this browser. Connect a wallet to share it.',
+        type: ToastType.Success,
+      })
+      return null
+    }
+    const sharedRole = activeShared && activeShared.id === draft.id
+      ? activeShared.authorAddress.toLowerCase() === address.toLowerCase()
+        ? 'author'
+        : (activeShared.collaborators || []).find((person) => person.address.toLowerCase() === address.toLowerCase())?.role === 'edit'
+          ? 'edit'
+          : 'comment'
+      : null
+    if (sharedRole === 'comment') {
+      addToast?.({
+        content: 'Saved on this browser. You can view and comment on this draft. You cannot edit it.',
+        type: ToastType.Failure,
+      })
+      return null
+    }
+    setSharing(true)
+    setAwaitingWallet(true)
+    try {
+      const digest = await sha256Hex(proposalCanonical(draft))
+      const exists = sharedProposals.some((item) => item.id === draft.id) || activeShared?.id === draft.id
+      const send = async (action: 'create' | 'update') => {
+        const timestamp = Date.now()
+        const signature = await new Promise<string>((resolve, reject) => {
+          const timer = window.setTimeout(() => reject(new Error('The wallet did not respond. Try Save again.')), 20000)
+          signMessageAsync({
+            message: signableMessage(action, draft.id, digest, timestamp),
+          }).then(
+            (value) => {
+              window.clearTimeout(timer)
+              resolve(value)
+            },
+            (error) => {
+              window.clearTimeout(timer)
+              reject(error)
+            },
+          )
+        })
+        setAwaitingWallet(false)
+        const payload = { ...draft, digest, signature, address, timestamp }
+        return action === 'create'
+          ? (await createSavedProposal(payload)).proposal
+          : (await updateSavedProposal(draft.id, payload)).proposal
+      }
+      let proposal: SavedProposal
+      try {
+        proposal = await send(exists ? 'update' : 'create')
+      } catch (error) {
+        if (!exists && error instanceof Error && error.message.includes('already exists')) {
+          proposal = await send('update')
+        } else {
+          throw error
+        }
+      }
+      setActiveShared(proposal)
+      const list = await listSavedProposals(address)
+      setSharedProposals(list.proposals)
+      setSharedReady(true)
+      addToast?.({
+        content: `Shared as ${personLabel(proposal.updatedByEns, proposal.updatedByAddress)}. Add people in the sidebar.`,
+        type: ToastType.Success,
+      })
+      return proposal
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not share this proposal.'
+      const declined = /reject|denied|cancel/i.test(message)
+      addToast?.({
+        content: declined
+          ? 'Saved on this browser. The wallet declined the signature.'
+          : `Saved on this browser. ${message}`,
+        type: ToastType.Failure,
+      })
+      return null
+    } finally {
+      setAwaitingWallet(false)
+      setSharing(false)
+    }
+  }
+
+  const persistDraft = (id: string, createdAt: number) => {
+    if (!enableDrafts) return
+    if (!editorHasWork) {
+      addToast?.({
+        content: 'Add a title, description, or action before saving.',
+        type: ToastType.Failure,
+      })
+      return
+    }
+    const now = Date.now()
+    const draft: EditorDraft = {
+      id,
+      title: currentTitle,
+      bodyMarkdown: currentMarkdown,
+      actions: currentActions,
+      contentType,
+      createdAt,
+      updatedAt: now,
+    }
+    try {
+      setDrafts(upsertEditorDraft(draft))
+      setActiveDraftId(id)
+      setDraftJustSaved(true)
+    } catch {
+      addToast?.({
+        content: 'Could not save on this browser. This browser’s storage is full.',
+        type: ToastType.Failure,
+      })
+    }
+    void publishDraft(draft)
+  }
+
+  const saveDraft = () => {
+    if (activeDraft) {
+      persistDraft(activeDraft.id, activeDraft.createdAt)
+      return
+    }
+    if (activeShared) {
+      persistDraft(activeShared.id, activeShared.createdAt)
+      return
+    }
+    persistDraft(newEditorDraftId(), Date.now())
+  }
+
+  const saveDraftAsNew = () => {
+    persistDraft(newEditorDraftId(), Date.now())
+  }
+
+  const openDraft = (draft: EditorDraft) => {
+    if (draft.id === activeDraftId && !draftDirty) return
+    const openingDifferentWork = activeDraft
+      ? draftDirty
+      : editorHasWork && draftSignature !== JSON.stringify({
+          title: draft.title,
+          bodyMarkdown: draft.bodyMarkdown,
+          actions: draft.actions,
+        })
+    if (openingDifferentWork && !window.confirm('Open this saved proposal and replace what is in the editor?')) {
+      return
+    }
+    handleTitleChange(draft.title)
+    handleBodyChange(markdownToDescendants(draft.bodyMarkdown))
+    handleActionsChange(draft.actions)
+    setActiveDraftId(draft.id)
+    setActiveShared(null)
+  }
+
+  const startNewDraft = () => {
+    if (!editorHasWork && !activeDraft && !activeShared) return
+    if (unsavedChanges && !window.confirm('Start a new proposal? Save this one first if you want to keep what you wrote.')) {
+      return
+    }
+    const emptyBody = [createEmptyParagraphElement()] as Descendant[]
+    handleTitleChange('')
+    handleBodyChange(emptyBody)
+    handleActionsChange([])
+    setActiveDraftId(null)
+    setActiveShared(null)
+    setInlineTarget(null)
+    setAttached(null)
+    setProposalComment('')
+    setSavedBaseline(JSON.stringify({
+      title: '',
+      bodyMarkdown: messageUtils.descendantsToMarkdown(emptyBody as any),
+      actions: [],
+    }))
+  }
+
+  const openSharedProposal = async (id: string) => {
+    if (activeShared?.id === id && !draftDirty) return
+    const openingDifferentWork = editorHasWork && activeShared?.id !== id
+    if (openingDifferentWork && !window.confirm('Open this shared proposal and replace what is in the editor?')) {
+      return
+    }
+    if (!address) {
+      addToast?.({
+        content: 'Connect a wallet and sign in to open a shared proposal.',
+        type: ToastType.Failure,
+      })
+      return
+    }
+    try {
+      const { proposal } = await getSavedProposal(id, address)
+      handleTitleChange(proposal.title)
+      handleBodyChange(markdownToDescendants(proposal.bodyMarkdown))
+      handleActionsChange(proposal.actions)
+      setActiveDraftId(proposal.id)
+      setActiveShared(proposal)
+      setInlineTarget(null)
+      setAttached(null)
+      setDrafts(upsertEditorDraft({
+        id: proposal.id,
+        title: proposal.title,
+        bodyMarkdown: proposal.bodyMarkdown,
+        actions: proposal.actions,
+        contentType: proposal.contentType,
+        createdAt: proposal.createdAt,
+        updatedAt: proposal.updatedAt,
+      }))
+    } catch (error) {
+      addToast?.({
+        content: error instanceof Error ? error.message : 'Could not open that proposal.',
+        type: ToastType.Failure,
+      })
+    }
+  }
+
+  const showDiscussionError = (error: unknown, fallback: string) => {
+    const message = error instanceof Error ? error.message : fallback
+    const declined = /reject|denied|cancel/i.test(message)
+    addToast?.({
+      content: declined ? 'The wallet declined the signature.' : message,
+      type: ToastType.Failure,
+    })
+  }
+
+  const rememberShared = async (proposal: SavedProposal, syncActions = false) => {
+    setActiveShared(proposal)
+    if (syncActions) handleActionsChange(proposal.actions)
+    if (!address) return
+    const list = await listSavedProposals(address)
+    setSharedProposals(list.proposals)
+    setSharedReady(true)
+  }
+
+  const submitComment = async (owner: 'proposal' | 'inline') => {
+    if (!activeShared || !address) {
+      addToast?.({ content: 'Connect a wallet to comment.', type: ToastType.Failure })
+      return
+    }
+    const text = (owner === 'proposal' ? proposalComment : inlineComment).trim()
+    const requested = attached?.owner === owner ? attached.action : null
+    const target = owner === 'proposal' ? 'proposal' : inlineTarget?.target
+    if (!target || (!text && !requested)) return
+    const fields = {
+      text,
+      target,
+      blockIndex: owner === 'inline' && target === 'block' ? inlineTarget?.blockIndex ?? null : null,
+      blockExcerpt: owner === 'inline' ? (inlineTarget?.excerpt || '').slice(0, 180) : '',
+      actionIndex: owner === 'inline' && target === 'ask' ? inlineTarget?.actionIndex ?? null : null,
+      action: requested,
+    }
+    setDiscussionBusy(owner)
+    try {
+      const digest = await sha256Hex(commentCanonical(fields))
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('comment', activeShared.id, digest, timestamp),
+      })
+      const { proposal } = await addSavedProposalComment(activeShared.id, {
+        ...fields,
+        digest,
+        signature,
+        address,
+        timestamp,
+      })
+      await rememberShared(proposal)
+      if (owner === 'proposal') setProposalComment('')
+      else setInlineComment('')
+      if (attached?.owner === owner) setAttached(null)
+    } catch (error) {
+      showDiscussionError(error, 'Could not post that comment.')
+    } finally {
+      setDiscussionBusy(null)
+    }
+  }
+
+  const replyToComment = async (comment: SavedProposalComment) => {
+    if (!activeShared || !address) return
+    const text = (replyDrafts[comment.id] || '').trim()
+    if (!text) return
+    setDiscussionBusy(comment.id)
+    try {
+      const digest = await sha256Hex(replyCanonical(comment.id, text))
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('reply', activeShared.id, digest, timestamp),
+      })
+      const { proposal } = await replyToSavedProposalComment(activeShared.id, comment.id, {
+        text,
+        digest,
+        signature,
+        address,
+        timestamp,
+      })
+      await rememberShared(proposal)
+      setReplyDrafts((current) => ({ ...current, [comment.id]: '' }))
+    } catch (error) {
+      showDiscussionError(error, 'Could not post that reply.')
+    } finally {
+      setDiscussionBusy(null)
+    }
+  }
+
+  const decideComment = async (
+    comment: SavedProposalComment,
+    decision: 'add' | 'update' | 'reject',
+    action: Action | null,
+  ) => {
+    if (!activeShared || !address) return
+    const fields = { commentId: comment.id, decision, action, note: '' }
+    setDiscussionBusy(comment.id)
+    try {
+      const digest = await sha256Hex(decisionCanonical(fields))
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('decide', activeShared.id, digest, timestamp),
+      })
+      const { proposal } = await decideSavedProposalComment(activeShared.id, comment.id, {
+        ...fields,
+        digest,
+        signature,
+        address,
+        timestamp,
+      })
+      await rememberShared(proposal, true)
+    } catch (error) {
+      showDiscussionError(error, 'Could not update that request.')
+    } finally {
+      setDiscussionBusy(null)
+    }
+  }
+
+  const copySharedLink = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/draft/${id}`)
+      addToast?.({ content: 'Link copied.', type: ToastType.Success })
+    } catch {
+      addToast?.({ content: 'Could not copy the link.', type: ToastType.Failure })
+    }
+  }
+
+  const grantPerson = async (person: string, role: SavedProposalAccess) => {
+    const who = person.trim()
+    if (!address || !who) return
+    setDiscussionBusy('invite')
+    try {
+      let shared = activeShared && (!activeDraft || activeShared.id === activeDraft.id) ? activeShared : null
+      if (!shared) {
+        if (!editorHasWork) {
+          addToast?.({
+            content: 'Add a title, description, or action before sharing.',
+            type: ToastType.Failure,
+          })
+          return
+        }
+        const draft: EditorDraft = {
+          id: activeDraft?.id || newEditorDraftId(),
+          title: currentTitle,
+          bodyMarkdown: currentMarkdown,
+          actions: currentActions,
+          contentType,
+          createdAt: activeDraft?.createdAt || Date.now(),
+          updatedAt: Date.now(),
+        }
+        setDrafts(upsertEditorDraft(draft))
+        setActiveDraftId(draft.id)
+        shared = await publishDraft(draft)
+        if (!shared) return
+      }
+      if (shared.authorAddress.toLowerCase() !== address.toLowerCase()) {
+        addToast?.({
+          content: 'Only the author can change who has access.',
+          type: ToastType.Failure,
+        })
+        return
+      }
+      const digest = await sha256Hex(inviteKey(who))
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('invite', shared.id, digest, timestamp),
+      })
+      const { proposal } = await addSavedProposalCollaborator(shared.id, {
+        person: who,
+        role,
+        digest,
+        signature,
+        address,
+        timestamp,
+      })
+      await rememberShared(proposal)
+      if (who.toLowerCase() === personInput.trim().toLowerCase()) setPersonInput('')
+    } catch (error) {
+      showDiscussionError(error, 'Could not update that person.')
+    } finally {
+      setDiscussionBusy(null)
+    }
+  }
+
+  const uninvitePerson = async (personAddress: string) => {
+    if (!activeShared || !address) return
+    setDiscussionBusy(personAddress)
+    try {
+      const digest = await sha256Hex(inviteKey(personAddress))
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('uninvite', activeShared.id, digest, timestamp),
+      })
+      const { proposal } = await removeSavedProposalCollaborator(activeShared.id, {
+        person: personAddress,
+        digest,
+        signature,
+        address,
+        timestamp,
+      })
+      await rememberShared(proposal)
+    } catch (error) {
+      showDiscussionError(error, 'Could not remove that person.')
+    } finally {
+      setDiscussionBusy(null)
+    }
+  }
+
+  const viewerAccess: 'author' | 'edit' | 'comment' | 'none' = !activeShared || !address
+    ? 'author'
+    : activeShared.authorAddress.toLowerCase() === address.toLowerCase()
+      ? 'author'
+      : (activeShared.collaborators || []).some((person) => person.address.toLowerCase() === address.toLowerCase() && person.role === 'edit')
+        ? 'edit'
+        : (activeShared.collaborators || []).some((person) => person.address.toLowerCase() === address.toLowerCase())
+          ? 'comment'
+          : 'none'
+  const canChangeDraft = viewerAccess === 'author' || viewerAccess === 'edit'
+  const canManagePeople = viewerAccess === 'author'
+  const editorDisabled = disabled || !canChangeDraft
+
+  const threadProps = {
+    isEditor: canChangeDraft,
+    replyDrafts,
+    onReplyDraft: (id: string, text: string) => setReplyDrafts((current) => ({ ...current, [id]: text })),
+    onReply: (comment: SavedProposalComment) => { void replyToComment(comment) },
+    onAdd: (comment: SavedProposalComment) => { void decideComment(comment, 'add', comment.action) },
+    onReject: (comment: SavedProposalComment) => { void decideComment(comment, 'reject', null) },
+    onUpdate: (comment: SavedProposalComment) => {
+      if (!comment.action) return
+      setRequestDialog({ mode: 'update', commentId: comment.id, action: comment.action })
+    },
+    busyId: discussionBusy,
+  }
+
+  const removeSharedProposal = async (proposal: SavedProposalSummary) => {
+    if (!address || address.toLowerCase() !== proposal.authorAddress.toLowerCase()) return
+    const label = proposal.title.trim() || 'Untitled proposal'
+    if (!window.confirm(`Remove “${label}” for everyone?`)) return
+    try {
+      const digest = await sha256Hex(proposal.id)
+      const timestamp = Date.now()
+      const signature = await signMessageAsync({
+        message: signableMessage('delete', proposal.id, digest, timestamp),
+      })
+      await deleteSavedProposal(proposal.id, { digest, signature, address, timestamp })
+      setSharedProposals((current) => current.filter((item) => item.id !== proposal.id))
+      if (activeShared?.id === proposal.id) setActiveShared(null)
+    } catch (error) {
+      addToast?.({
+        content: error instanceof Error ? error.message : 'Could not remove that proposal.',
+        type: ToastType.Failure,
+      })
+    }
+  }
+
+  const deleteDraft = (draft: EditorDraft) => {
+    const label = draft.title.trim() || 'Untitled proposal'
+    if (!window.confirm(`Remove “${label}” from this browser?`)) return
+    try {
+      setDrafts(removeEditorDraft(draft.id))
+      if (activeDraftId === draft.id) setActiveDraftId(null)
+    } catch {
+      addToast?.({
+        content: 'Could not remove that saved proposal.',
+        type: ToastType.Failure,
+      })
+    }
+  }
 
   // Map action index to transaction indices
   // This is needed because one action can create multiple transactions (e.g., streaming payments)
@@ -534,12 +1269,14 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
           content: 'Proposal updated successfully!',
           type: ToastType.Success,
         })
+        allowLeaveRef.current = true
         navigate(`/vote/${actualProposalId}`)
       } else if (candidate) {
       addToast?.({
         content: 'Candidate updated successfully!',
         type: ToastType.Success,
       })
+      allowLeaveRef.current = true
       navigate(`/candidates/${actualCandidateId}`)
     }
     }
@@ -649,6 +1386,35 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
     }
   }
 
+  const pasteProposalFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const result = parsePastedProposal(text)
+      if (!result.success) {
+        addToast?.({
+          content: result.errors.join(' '),
+          type: ToastType.Failure,
+        })
+        return
+      }
+      if (result.proposal.title) handleTitleChange(result.proposal.title)
+      if (result.proposal.body) handleBodyChange(result.proposal.body)
+      if (result.proposal.actions) handleActionsChange(result.proposal.actions)
+      setPastedProposal(true)
+      setTimeout(() => setPastedProposal(false), 2000)
+      addToast?.({
+        content: 'Pasted the proposal into the editor.',
+        type: ToastType.Success,
+      })
+    } catch (err) {
+      console.error('Failed to paste proposal from clipboard:', err)
+      addToast?.({
+        content: 'Could not read the clipboard. Allow clipboard access and try again.',
+        type: ToastType.Failure,
+      })
+    }
+  }
+
   const copyActionsToClipboard = async () => {
     try {
       const actionsJson = JSON.stringify(currentActions, null, 2)
@@ -665,6 +1431,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
   // Check if body has content
   const bodyHasContent = currentBody.some((node: any) => {
+    if (node?.type === 'image' && node.url) return true
     const text = Node.string(node)
     return text.trim().length > 0
   })
@@ -696,6 +1463,10 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         <Button 
           variant="secondary" 
           onClick={() => {
+            if (unsavedChanges && !window.confirm('Leave this page? Save the proposal first if you want to keep what you wrote.')) {
+              return
+            }
+            allowLeaveRef.current = true
             if (actualProposalId) {
               navigate(`/vote/${actualProposalId}`)
             } else if (actualCandidateId) {
@@ -753,7 +1524,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
                         variant="secondary"
                         size="fit"
                         onClick={() => handleEditAction(index)}
-                        disabled={disabled}
+                        disabled={editorDisabled}
                         className="h-auto px-2 py-0.5 text-xs bg-white/50 border border-gray-200 text-gray-700"
                       >
                         Edit
@@ -767,7 +1538,42 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
                         {isExpanded ? 'Hide' : 'Show'} transaction
                         {isExpanded ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
                       </Button>
+                      {activeShared && (
+                        <button
+                          type="button"
+                          className="h-auto px-2 py-0.5 text-xs text-gray-500 hover:text-gray-800"
+                          onClick={() => {
+                            setInlineTarget({
+                              target: 'ask',
+                              blockIndex: null,
+                              actionIndex: index,
+                              excerpt: getActionSummary(action),
+                            })
+                            setInlineComment('')
+                          }}
+                        >
+                          Comment
+                        </button>
+                      )}
                     </div>
+                    {activeShared && (
+                      <DraftThread
+                        {...threadProps}
+                        comments={activeShared.comments.filter((comment) => comment.target === 'ask' && comment.actionIndex === index)}
+                      />
+                    )}
+                    {activeShared && inlineTarget?.target === 'ask' && inlineTarget.actionIndex === index && (
+                      <DraftComposer
+                        label="Commenting on this action"
+                        text={inlineComment}
+                        onText={setInlineComment}
+                        attached={attached?.owner === 'inline' ? attached.action : null}
+                        onAttach={() => setRequestDialog({ mode: 'attach', owner: 'inline' })}
+                        onClearAttached={() => setAttached(null)}
+                        onSubmit={() => { void submitComment('inline') }}
+                        busy={discussionBusy === 'inline'}
+                      />
+                    )}
 
                     {/* Expanded Transaction Details */}
                     {isExpanded && details.target && (
@@ -867,13 +1673,43 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
             <div className="mt-7 pl-6">
               <button
                 onClick={handleAddAction}
-                disabled={disabled}
+                disabled={editorDisabled}
                 className="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded text-sm text-gray-700 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="w-4 h-4" />
                 Add action
               </button>
             </div>
+            {activeShared && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  onClick={() => {
+                    setInlineTarget({ target: 'ask', blockIndex: null, actionIndex: null, excerpt: 'The ask' })
+                    setInlineComment('')
+                  }}
+                >
+                  Comment on the ask
+                </button>
+                <DraftThread
+                  {...threadProps}
+                  comments={activeShared.comments.filter((comment) => comment.target === 'ask' && comment.actionIndex === null)}
+                />
+                {inlineTarget?.target === 'ask' && inlineTarget.actionIndex === null && (
+                  <DraftComposer
+                    label="Commenting on the ask"
+                    text={inlineComment}
+                    onText={setInlineComment}
+                    attached={attached?.owner === 'inline' ? attached.action : null}
+                    onAttach={() => setRequestDialog({ mode: 'attach', owner: 'inline' })}
+                    onClearAttached={() => setAttached(null)}
+                    onSubmit={() => { void submitComment('inline') }}
+                    busy={discussionBusy === 'inline'}
+                  />
+                )}
+              </div>
+            )}
 
           </>
         )}
@@ -884,7 +1720,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
           <div className="mt-16">
             <button
               onClick={handleAddAction}
-              disabled={disabled}
+              disabled={editorDisabled}
               className="w-full h-24 bg-transparent border-2 border-gray-200 rounded-xl text-lg font-medium text-gray-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add a proposal action
@@ -929,14 +1765,14 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
             }
           }}
           disabled={
-            disabled || 
+            editorDisabled || 
             !isFormValid || 
             isSubmitting || 
             (mode === 'edit' && !updateReason.trim()) ||
             (!isVersion5 && (contentType === 'topic' || contentType === 'candidate'))
           }
           className={`w-full px-4 py-4 border-none rounded text-base font-medium transition-all duration-200 ${
-            disabled || 
+            editorDisabled || 
             !isFormValid || 
             isSubmitting || 
             (mode === 'edit' && !updateReason.trim()) ||
@@ -964,17 +1800,300 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
     </div>
   )
 
+  const accessSelectClass = 'w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700'
+
+  const draftSidebar = (
+    <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={saveDraft}
+            disabled={editorDisabled || sharing}
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            title={address ? 'Save here and share it from your wallet' : 'Save on this browser. Connect a wallet to share it.'}
+          >
+            <Save className="w-4 h-4" />
+            {awaitingWallet ? 'Waiting for wallet…' : sharing ? 'Sharing…' : draftJustSaved ? 'Saved' : activeDraft && draftDirty ? 'Save changes' : 'Save'}
+          </button>
+          {activeDraft && (
+            <button
+              type="button"
+              onClick={saveDraftAsNew}
+              disabled={editorDisabled}
+              className="w-full rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              title="Keep the current saved proposal and store this as another one"
+            >
+              Save as new
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={pasteProposalFromClipboard}
+            disabled={editorDisabled || pastedProposal}
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            title="Paste a proposal from the clipboard into the title, description, and actions"
+          >
+            <ClipboardPaste className="w-4 h-4" />
+            {pastedProposal ? 'Pasted' : 'Paste from clipboard'}
+          </button>
+        </div>
+        <div ref={setFormatSlot} className={editorDisabled ? 'hidden' : undefined} />
+        <div className="rounded-lg border border-gray-200 bg-white">
+          <div className="border-b border-gray-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+            People
+          </div>
+          <div className="px-3 py-3">
+            {!address ? (
+              <p className="text-sm text-gray-500">Connect a wallet to choose who can open this draft.</p>
+            ) : (
+              <>
+                {activeShared && canManagePeople && (
+                  <button
+                    type="button"
+                    onClick={() => { void copySharedLink(activeShared.id) }}
+                    className="mb-3 rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Copy link
+                  </button>
+                )}
+                <p className="mb-2 text-xs text-gray-500">
+                  {activeShared
+                    ? canManagePeople
+                      ? 'You choose who can edit, and who can only view and comment.'
+                      : viewerAccess === 'edit'
+                        ? 'You can edit this draft.'
+                        : 'You can view this draft and comment.'
+                    : 'Add someone to share this draft. It is saved first.'}
+                </p>
+                {(activeShared?.collaborators || []).length === 0 ? (
+                  <p className="mb-2 text-sm text-gray-400">No one else added yet.</p>
+                ) : (
+                  <ul className="mb-3 flex flex-col gap-2">
+                    {(activeShared?.collaborators || []).map((person) => (
+                      <li key={person.address} className="flex flex-col gap-1">
+                        <span className="truncate text-sm text-gray-800">{personLabel(person.ensName, person.address)}</span>
+                        <div className="flex items-center gap-2">
+                          {canManagePeople ? (
+                            <select
+                              value={person.role === 'edit' ? 'edit' : 'comment'}
+                              disabled={discussionBusy === 'invite'}
+                              onChange={(event) => { void grantPerson(person.address, event.target.value === 'edit' ? 'edit' : 'comment') }}
+                              className={accessSelectClass}
+                            >
+                              <option value="comment">View and comment</option>
+                              <option value="edit">Can edit</option>
+                            </select>
+                          ) : (
+                            <span className="text-xs text-gray-500">{person.role === 'edit' ? 'Can edit' : 'View and comment'}</span>
+                          )}
+                          {canManagePeople && (
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs text-gray-500 hover:text-red-600"
+                              disabled={discussionBusy === person.address}
+                              onClick={() => { void uninvitePerson(person.address) }}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {canManagePeople && (
+                  <div className="flex flex-col gap-2">
+                    <input
+                      value={personInput}
+                      onChange={(event) => setPersonInput(event.target.value)}
+                      placeholder="Address or ENS"
+                      disabled={discussionBusy === 'invite'}
+                      className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm outline-none focus:border-gray-400"
+                    />
+                    <select
+                      value={personRole}
+                      onChange={(event) => setPersonRole(event.target.value === 'edit' ? 'edit' : 'comment')}
+                      disabled={discussionBusy === 'invite'}
+                      className={accessSelectClass}
+                    >
+                      <option value="comment">View and comment</option>
+                      <option value="edit">Can edit</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => { void grantPerson(personInput, personRole) }}
+                      disabled={discussionBusy === 'invite' || !personInput.trim()}
+                      className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {discussionBusy === 'invite' ? 'Saving…' : 'Add'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white">
+            <div className="border-b border-gray-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+              Saved
+            </div>
+            <ul className="max-h-64 overflow-y-auto">
+              <li className={!editorHasWork && !activeDraft && !activeShared ? 'bg-green-50' : undefined}>
+                <button
+                  type="button"
+                  onClick={startNewDraft}
+                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-gray-50"
+                >
+                  <Plus className="h-4 w-4 shrink-0 text-gray-500" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-gray-900">New</span>
+                    <span className="block text-xs text-gray-500">Blank proposal</span>
+                  </span>
+                </button>
+              </li>
+              {visibleDrafts.map((draft) => {
+                const selected = draft.id === activeDraftId
+                const label = draft.title.trim() || 'Untitled proposal'
+                return (
+                  <li key={draft.id} className={selected ? 'bg-green-50' : undefined}>
+                    <div className="flex items-center gap-2 px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openDraft(draft)}
+                        className="min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-gray-50"
+                      >
+                        <span className="block truncate text-sm text-gray-900">{label}</span>
+                        <span className="block text-xs text-gray-500">
+                          {selected ? 'Open in the editor' : 'Open'} · {formatEditorDraftTime(draft.updatedAt)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteDraft(draft)}
+                        className="rounded p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
+                        aria-label={`Remove ${label}`}
+                        title="Remove from this browser"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white">
+          <div className="border-b border-gray-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+            Shared proposals
+          </div>
+          {!address ? (
+            <p className="px-3 py-3 text-sm text-gray-500">
+              Connect a wallet to see shared proposals.
+            </p>
+          ) : !sharedReady ? (
+            <div className="px-3 py-3">
+              <p className="mb-2 text-sm text-gray-500">
+                Shared proposals are not public. Sign with your wallet to view them.
+              </p>
+              <button
+                type="button"
+                onClick={() => { void unlockShared() }}
+                disabled={unlocking}
+                className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {unlocking ? 'Waiting for signature…' : 'Sign in to view'}
+              </button>
+            </div>
+          ) : visibleShared.length === 0 ? (
+            <p className="px-3 py-3 text-sm text-gray-500">
+              No shared proposals yet. Save with your wallet to put one on the server.
+            </p>
+          ) : (
+            <ul className="max-h-72 overflow-y-auto">
+              {visibleShared.map((proposal) => {
+                const selected = proposal.id === activeShared?.id
+                const label = proposal.title.trim() || 'Untitled proposal'
+                const mine = address?.toLowerCase() === proposal.authorAddress.toLowerCase()
+                return (
+                  <li key={proposal.id} className={selected ? 'bg-green-50' : undefined}>
+                    <div className="flex items-center gap-2 px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => { void openSharedProposal(proposal.id) }}
+                        className="min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-gray-50"
+                      >
+                        <span className="block truncate text-sm text-gray-900">{label}</span>
+                        <span className="block text-xs text-gray-500">
+                          {mine ? personLabel(proposal.authorEns, proposal.authorAddress) : `Shared with you by ${personLabel(proposal.authorEns, proposal.authorAddress)}`}
+                          {' · '}
+                          {proposal.commentCount} {proposal.commentCount === 1 ? 'comment' : 'comments'}
+                          {' · '}
+                          {formatEditorDraftTime(proposal.updatedAt)}
+                        </span>
+                      </button>
+                      {mine && (
+                        <button
+                          type="button"
+                          onClick={() => { void copySharedLink(proposal.id) }}
+                          className="rounded p-2 text-gray-500 hover:bg-gray-100"
+                          aria-label={`Copy link for ${label}`}
+                          title="Copy link"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      )}
+                      {mine && (
+                        <button
+                          type="button"
+                          onClick={() => { void removeSharedProposal(proposal) }}
+                          className="rounded p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
+                          aria-label={`Remove ${label} for everyone`}
+                          title="Remove for everyone"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {activeShared && (
+            <div className="border-t border-gray-100 px-3 py-3">
+              <DraftThread
+                {...threadProps}
+                comments={activeShared.comments.filter((comment) => comment.target === 'proposal' || !comment.target)}
+              />
+              <DraftComposer
+                label="Comment on the whole draft"
+                text={proposalComment}
+                onText={setProposalComment}
+                attached={attached?.owner === 'proposal' ? attached.action : null}
+                onAttach={() => setRequestDialog({ mode: 'attach', owner: 'proposal' })}
+                onClearAttached={() => setAttached(null)}
+                onSubmit={() => { void submitComment('proposal') }}
+                busy={discussionBusy === 'proposal'}
+              />
+            </div>
+          )}
+        </div>
+    </div>
+  )
+
   // Render main content
   const mainContent = (
     <div className="relative w-full max-w-4xl">
       <div className={`flex flex-col xl:pb-64 w-full overflow-hidden ${hasHeader ? 'pt-0' : 'pt-0 sm:pt-24 xl:pt-24'}`}>
+
         {/* Title */}
         <textarea
           ref={titleTextareaRef}
           placeholder={titlePlaceholder}
           value={currentTitle || ''}
           onChange={(e) => handleTitleChange(e.target.value)}
-          disabled={disabled}
+          disabled={editorDisabled}
           rows={1}
           className="w-full bg-transparent border-none outline-none mb-1 placeholder-gray-400 font-londrina text-6xl md:text-7xl font-normal leading-tight text-gray-900 caret-gray-900 break-words min-w-0 resize-none"
           style={{ 
@@ -985,7 +2104,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         />
 
         {/* Subtitle */}
-        <div className="text-gray-500 text-base mb-6">
+        <div className="mb-6 text-base text-gray-500">
           By {address ? (
             <span className="text-gray-500">
               {address.slice(0, 6)}...{address.slice(-4)}
@@ -993,13 +2112,47 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
           ) : '0x...'}
         </div>
 
+
         {/* Body Editor */}
         <div className="w-full max-w-4xl break-words">
           <RichTextEditor
             value={currentBody}
             onChange={handleBodyChange}
-            placeholder='Use markdown shortcuts like "# " and "1. " to create headings and lists.'
-            readOnly={disabled}
+            placeholder='Click a block to edit its markdown. A blank line splits it into two blocks.'
+            readOnly={editorDisabled}
+            toolbarSlot={enableDrafts ? formatSlot : null}
+            renderBlockFooter={activeShared ? (index) => {
+              const excerpt = Node.string(currentBody[index] || { text: '' }).replace(/\s+/g, ' ').trim().slice(0, 180) || 'This block'
+              const comments = activeShared.comments.filter((comment) => comment.target === 'block' && comment.blockIndex === index)
+              const open = inlineTarget?.target === 'block' && inlineTarget.blockIndex === index
+              return (
+                <div className="px-1 pb-2">
+                  <button
+                    type="button"
+                    className="text-xs text-gray-500 hover:text-gray-800"
+                    onClick={() => {
+                      setInlineTarget({ target: 'block', blockIndex: index, actionIndex: null, excerpt })
+                      setInlineComment('')
+                    }}
+                  >
+                    {comments.length ? `Comment (${comments.length})` : 'Comment'}
+                  </button>
+                  <DraftThread {...threadProps} comments={comments} />
+                  {open && (
+                    <DraftComposer
+                      label="Commenting on this block"
+                      text={inlineComment}
+                      onText={setInlineComment}
+                      attached={attached?.owner === 'inline' ? attached.action : null}
+                      onAttach={() => setRequestDialog({ mode: 'attach', owner: 'inline' })}
+                      onClearAttached={() => setAttached(null)}
+                      onSubmit={() => { void submitComment('inline') }}
+                      busy={discussionBusy === 'inline'}
+                    />
+                  )}
+                </div>
+              )
+            } : undefined}
           />
         </div>
       </div>
@@ -1012,8 +2165,13 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
       {editHeader}
 
       {/* Unified Layout */}
-      <div className="lg:grid lg:grid-cols-[2fr_400px] lg:gap-20 lg:p-8 lg:px-12 lg:w-full">
-        
+      <div className={`lg:grid ${enableDrafts ? 'lg:grid-cols-[240px_minmax(0,1fr)_320px] xl:grid-cols-[260px_minmax(0,1fr)_400px]' : 'lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_400px]'} lg:items-start lg:gap-8 lg:p-8 lg:px-8 xl:px-12 lg:w-full`}>
+        {enableDrafts && (
+        <aside className={`min-w-0 px-5 lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto lg:px-0 ${hasHeader ? 'pt-4' : 'pt-6 sm:pt-24'}`}>
+          {draftSidebar}
+        </aside>
+        )}
+
         {/* Main Content Column - Always rendered here */}
         <div className="min-w-0 w-full overflow-hidden break-words px-5 lg:px-0">
           {mainContent}
@@ -1056,6 +2214,27 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         onDelete={editingActionIndex !== null ? handleActionDelete : undefined}
         action={editingActionIndex !== null ? actions[editingActionIndex] : undefined}
         title={editingActionIndex !== null ? 'Edit Action' : 'Add action'}
+      />
+
+      <ActionDialog
+        isOpen={requestDialog !== null}
+        onClose={() => setRequestDialog(null)}
+        title={requestDialog?.mode === 'update' ? 'Update requested action' : 'Attach an action'}
+        action={
+          requestDialog?.mode === 'update'
+            ? requestDialog.action
+            : requestDialog?.mode === 'attach' && attached?.owner === requestDialog.owner
+              ? attached.action
+              : undefined
+        }
+        onSubmit={(action) => {
+          if (requestDialog?.mode === 'update') {
+            const comment = activeShared?.comments.find((item) => item.id === requestDialog.commentId)
+            if (comment) void decideComment(comment, 'update', action)
+          } else if (requestDialog?.mode === 'attach') {
+            setAttached({ owner: requestDialog.owner, action })
+          }
+        }}
       />
 
       {/* Submission Dialog */}

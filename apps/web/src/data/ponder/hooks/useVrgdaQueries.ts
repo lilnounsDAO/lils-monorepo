@@ -10,6 +10,7 @@ import {
 import { getVrgdaPoolSeeds, getLatestVrgdaSeeds } from '../vrgda/getVrgdaPoolSeeds';
 import { getVrgdaSeedByBlock } from '../vrgda/getVrgdaSeedByBlock';
 import { getVrgdaPoolStatus } from '../vrgda/getVrgdaPoolStatus';
+import { getOnchainVrgdaPoolSeeds } from '@/data/sepolia/getOnchainVrgdaPool';
 import { isSepoliaNetwork } from '@/utils/networkDetection';
 
 // Query for VRGDA pool status
@@ -56,10 +57,13 @@ export function useVrgdaPoolSeeds(
 ) {
   const isSepolia = isSepoliaNetwork();
   return useQuery({
-    queryKey: ['vrgda-pool-seeds', filters, sortField, sortDirection, limit],
-    queryFn: () => getVrgdaPoolSeeds(filters, sortField, sortDirection, limit, 0),
-    enabled: !isSepolia, // Disable on Sepolia - not indexed in Ponder yet
-    staleTime: 30000, // 30 seconds
+    queryKey: ['vrgda-pool-seeds', filters, sortField, sortDirection, limit, isSepolia],
+    queryFn: () =>
+      isSepolia
+        ? getOnchainVrgdaPoolSeeds(limit)
+        : getVrgdaPoolSeeds(filters, sortField, sortDirection, limit, 0),
+    staleTime: isSepolia ? 12000 : 30000,
+    refetchInterval: isSepolia ? 15000 : false,
   });
 }
 

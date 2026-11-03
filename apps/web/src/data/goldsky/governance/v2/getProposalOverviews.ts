@@ -59,6 +59,7 @@ function getGoldskyUrl(daoType: DaoType): string {
 export async function getProposalOverviews(limit: number = 500, daoType: DaoType = 'lilnouns'): Promise<ProposalOverview[]> {
   try {
     const goldskyUrl = getGoldskyUrl(daoType);
+    if (!goldskyUrl) return [];
     console.log('[getProposalOverviews V2] Fetching proposals from Goldsky:', goldskyUrl, 'daoType:', daoType);
     
     const data = await graphQLFetch(

@@ -8,7 +8,7 @@ export function Header() {
   return (
     <HidingHeader>
       <div
-        className="flex w-full flex-row justify-between overflow-hidden bg-white px-4 py-2 shadow-bottom-only md:px-8"
+        className="flex w-full flex-row justify-between overflow-visible bg-white px-4 py-2 shadow-bottom-only md:px-8"
         style={{ height: HEADER_HEIGHT }}
       >
         <div className="flex items-center gap-6 md:flex-1">

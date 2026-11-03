@@ -1,5 +1,6 @@
 import { cleanGraphQLFetch } from "../utils/cleanGraphQLFetch";
 import { GetNounsPaginatedDocument, OrderDirection, NounWhereInput } from "@/data/generated/ponder/clean-graphql";
+import { getOnchainNouns, usesOnchainData } from "@/data/sepolia/onchain";
 
 const BURN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -8,6 +9,11 @@ const BURN_ADDRESS = "0x0000000000000000000000000000000000000000";
  * This fetches all nouns in batches and counts unique owners
  */
 export async function getUniqueNounOwnersCount(): Promise<number> {
+  if (usesOnchainData()) {
+    const nouns = await getOnchainNouns();
+    return new Set(nouns.map((noun) => noun.owner.toLowerCase())).size;
+  }
+
   try {
     const uniqueOwners = new Set<string>();
     let offset = 0;

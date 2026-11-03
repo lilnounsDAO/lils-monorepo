@@ -3,9 +3,14 @@ import { Address } from "viem";
 import { Noun } from "./types";
 import { getNounsForAddress as getPonderNounsForAddress } from "@/data/ponder/nouns";
 import { transformPonderNounToNoun } from "./helpers";
+import { getOnchainNounsForAddress, usesOnchainData } from "@/data/sepolia/onchain";
 
 export async function getNounsForAddress(address: Address): Promise<Noun[]> {
   try {
+    if (usesOnchainData()) {
+      return getOnchainNounsForAddress(address);
+    }
+
     // Use efficient Ponder query instead of loading all 7000+ nouns
     const ponderNouns = await getPonderNounsForAddress(address);
 

@@ -21,6 +21,10 @@ export async function graphQLFetch<Result, Variables>(
   variables?: Variables,
   cacheConfig?: CacheConfig,
 ): Promise<Result | null> {
+  if (!url) {
+    return null;
+  }
+
   // Handle both TypedDocumentString (has toString()) and DocumentNode (needs print())
   let queryString = "";
   if (query) {

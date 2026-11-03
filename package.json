@@ -21,13 +21,17 @@
     "version-packages": "changeset version",
     "release": "turbo run build && changeset publish",
     "dev:goldsky-rpc": "cd workers/goldsky-rpc && bun run dev",
-    "deploy:goldsky-rpc": "cd workers/goldsky-rpc && bun run deploy"
+    "deploy:goldsky-rpc": "cd workers/goldsky-rpc && bun run deploy",
+    "deploy:goldsky-subgraph": "bun run --cwd packages/subgraph deploy:sepolia-rehearsal"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "4.9.6",
+    "@openzeppelin/contracts-upgradeable": "4.9.6",
     "@payloadcms/richtext-lexical": "3.13.0",
     "@snapshot-labs/snapshot.js": "0.14.14",
     "ethers": "6.15.0",
     "sharp": "0.34.5",
+    "solmate": "6.2.0",
     "uint8array-extras": "^1.3.0",
     "wrangler": "4"
   },

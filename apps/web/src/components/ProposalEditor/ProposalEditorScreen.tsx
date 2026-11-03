@@ -10,9 +10,20 @@ import { useCreateProposalCandidate } from '@/hooks/transactions/useCreatePropos
 import { useCreateTopic } from '@/hooks/transactions/useCreateTopic'
 import { messageUtils } from '@/utils/message-utils'
 import { ToastContext, ToastType } from '@/providers/toast'
+import { isLocalMainnetHost } from '@/utils/networkDetection'
+import { markdownToDescendants } from '@/utils/parsePastedProposal'
+import {
+  MAINNET_V5_UPGRADE_ACTIONS,
+  MAINNET_V5_UPGRADE_BODY,
+  MAINNET_V5_UPGRADE_TITLE,
+} from '@/data/mainnetV5UpgradeProposal'
+import { loadEditorDrafts } from '@/utils/editorDrafts'
 
 const ProposalEditorScreen: React.FC = () => {
-  const { id } = useParams<{ id: string }>()
+  const { id, draftId } = useParams<{ id?: string; draftId?: string }>()
+  const storedDraft = draftId
+    ? loadEditorDrafts().find((draft) => draft.id === draftId)
+    : undefined
   const location = useLocation()
   const { address } = useAccount()
   const { addToast } = useContext(ToastContext)
@@ -21,14 +32,27 @@ const ProposalEditorScreen: React.FC = () => {
   const isCandidateUpdate = location.pathname.startsWith('/update/candidate')
   const isProposalUpdate = location.pathname.startsWith('/update/proposal')
   const isTopicCreate = location.pathname.startsWith('/new/topic')
+  const isCandidateCreate = location.pathname.startsWith('/new/candidate')
   const mode = (isCandidateUpdate || isProposalUpdate) ? 'edit' : 'create'
   const editType = isCandidateUpdate ? 'candidate' : isProposalUpdate ? 'proposal' : null
-  const contentType = isTopicCreate ? 'topic' : 'proposal'
+  const contentType = storedDraft?.contentType
+    ?? (isTopicCreate ? 'topic' : isCandidateCreate ? 'candidate' : 'proposal')
+
+  // Localhost mainnet opens a blank /new with the V5 upgrade proposal already in the editor.
+  const preparedUpgrade = contentType === 'proposal' && isLocalMainnetHost() && !storedDraft
 
   // Local state for proposal data (only used in create mode)
-  const [title, setTitle] = useState('')
-  const [body, setBody] = useState<Descendant[]>([createEmptyParagraphElement()])
-  const [actions, setActions] = useState<Action[]>([])
+  const [title, setTitle] = useState(storedDraft?.title ?? (preparedUpgrade ? MAINNET_V5_UPGRADE_TITLE : ''))
+  const [body, setBody] = useState<Descendant[]>(
+    storedDraft
+      ? markdownToDescendants(storedDraft.bodyMarkdown)
+      : preparedUpgrade
+        ? markdownToDescendants(MAINNET_V5_UPGRADE_BODY)
+        : [createEmptyParagraphElement()]
+  )
+  const [actions, setActions] = useState<Action[]>(
+    storedDraft?.actions ?? (preparedUpgrade ? MAINNET_V5_UPGRADE_ACTIONS : [])
+  )
 
   // Proposal creation hook (only used in create mode for proposals)
   const { createProposal, state: proposalState, receipt: proposalReceipt } = useCreateProposal()
@@ -153,12 +177,14 @@ const ProposalEditorScreen: React.FC = () => {
         onBodyChange={setBody}
         onActionsChange={setActions}
         onSubmit={handleSubmit}
-      submitLabel={contentType === 'topic' ? 'Create Topic' : 'Create Proposal'}
+      submitLabel={contentType === 'topic' ? 'Create Topic' : contentType === 'candidate' ? 'Create Candidate' : 'Create Proposal'}
       disabled={isAnyPending}
       isSubmitting={isAnyPending}
-      defaultSubmissionType={contentType === 'topic' ? 'topic' : 'candidate'}
-      titlePlaceholder={contentType === 'topic' ? 'Untitled topic' : contentType === 'proposal' ? 'Untitled proposal' : 'Untitled candidate'}
-      contentType={contentType === 'topic' ? 'topic' : contentType === 'proposal' ? 'proposal' : 'candidate'}
+      defaultSubmissionType={contentType === 'topic' ? 'topic' : contentType === 'candidate' ? 'candidate' : 'proposal'}
+      titlePlaceholder={contentType === 'topic' ? 'Untitled topic' : contentType === 'candidate' ? 'Untitled candidate' : 'Untitled proposal'}
+      contentType={contentType}
+      initialDraftId={storedDraft?.id ?? null}
+      enableDrafts={new URLSearchParams(location.search).get('dao') !== 'nouns'}
     />
   )
 }

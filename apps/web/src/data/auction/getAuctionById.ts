@@ -7,11 +7,54 @@ import { Hex, getAddress } from "viem";
 import { getProtocolParams } from "../protocol/getProtocolParams";
 import { bigIntMax } from "@/utils/bigint";
 import { revalidateTag, unstable_cache } from "@/utils/viteCache";
-import { FIRST_VRGDA_NOUN_ID } from "@/utils/vrgdaUtils";
+import { FIRST_VRGDA_NOUN_ID, isVRGDANoun } from "@/utils/vrgdaUtils";
+import { getOnchainAuctionHouseAuction } from "./getOnchainAuction";
+import { isSepoliaNetwork } from "@/utils/networkDetection";
+import { auctionFromMintedNoun, getOnchainNounById, getMinterMode, usesOnchainData } from "@/data/sepolia/onchain";
 
 const NOUNDER_AUCTION_CUTOFF = BigInt(175300);
 const NOUNSDAO_AUCTION_CUTOFF = BigInt(175301);
 const VRGDA_AUCTION_CUTOFF = BigInt(FIRST_VRGDA_NOUN_ID); // Use the correct VRGDA cutoff
+
+function auctionFromSubgraph(auction: any, params: { reservePrice: string; minBidIncrementPercentage: string }): Auction {
+  const bids: Bid[] = auction.bids.map((bid: any) => ({
+    transactionHash: bid.id as Hex,
+    bidderAddress: getAddress(bid.bidder.id),
+    amount: bid.amount,
+    timestamp: bid.blockTimestamp,
+    clientId: undefined,
+  }));
+
+  bids.sort((a, b) => (BigInt(b.amount) > BigInt(a.amount) ? 1 : -1));
+
+  const highestBidAmount =
+    auction.bids.length > 0 ? BigInt(bids[0].amount) : BigInt(0);
+  const nextMinBid = bigIntMax(
+    BigInt(params.reservePrice),
+    highestBidAmount +
+      (highestBidAmount * BigInt(params.minBidIncrementPercentage)) /
+        BigInt(100),
+  );
+
+  const nowS = Date.now() / 1000;
+  const ended = nowS > Number(auction.endTime);
+
+  return {
+    nounId: auction.noun.id,
+    startTime: auction.startTime,
+    endTime: auction.endTime,
+    nextMinBid: nextMinBid.toString(),
+    state: ended
+      ? auction.settled
+        ? "ended-settled"
+        : "ended-unsettled"
+      : "live",
+    bids,
+    nounderAuction: false,
+    nounsdaoAuction: false,
+    isVRGDAAuction: Boolean(auction.isVrgda),
+  };
+}
 
 const query = graphql(/* GraphQL */ `
   query Auction($id: ID!) {
@@ -44,15 +87,42 @@ async function getAuctionByIdUncached(
   id: BigIntString,
 ): Promise<Auction | undefined> {
 
+  if (isSepoliaNetwork()) {
+    if (!usesOnchainData() && CHAIN_CONFIG.subgraphUrl.primary) {
+      try {
+        const result = await graphQLFetchWithFallback(
+          CHAIN_CONFIG.subgraphUrl,
+          query,
+          { id },
+          { next: { revalidate: 0 } },
+        );
+        if (result?.auction) {
+          const params = await getProtocolParams();
+          return auctionFromSubgraph(result.auction, params);
+        }
+      } catch (error) {
+        console.error("sepolia goldsky auction read failed, using contracts", error);
+      }
+    }
+    const onchain = await getOnchainAuctionHouseAuction();
+    if (onchain && onchain.nounId === id) return onchain;
+    const noun = await getOnchainNounById(id);
+    if (noun) {
+      const mode = await getMinterMode();
+      return auctionFromMintedNoun(id, mode === "vrgda");
+    }
+    return undefined;
+  }
+
   const isNounderNoun = BigInt(id) % BigInt(10) == BigInt(0)
   const isNounsDAONoun = BigInt(id) % BigInt(10) == BigInt(1)
-  const isVRGDANoun = BigInt(id) >= VRGDA_AUCTION_CUTOFF;
+  const isVRGDANounId = isVRGDANoun(Number(id));
 
   // Create mock auctions for Nounder/NounsDAO nouns or any VRGDA noun
   if (
     (BigInt(id) <= NOUNDER_AUCTION_CUTOFF && isNounderNoun) ||
     (BigInt(id) <= NOUNSDAO_AUCTION_CUTOFF && isNounsDAONoun) ||
-    isVRGDANoun
+    isVRGDANounId
   ) {
     const nextNoun = await getAuctionByIdUncached(
       (BigInt(id) + BigInt(1)).toString(),
@@ -69,11 +139,11 @@ async function getAuctionByIdUncached(
       nextMinBid: "0",
 
       // VRGDA auctions are always "live" since they can be purchased anytime
-      state: isVRGDANoun ? "live" : "ended-settled",
+      state: isVRGDANounId ? "live" : "ended-settled",
 
       bids: [],
 
-      isVRGDAAuction: isVRGDANoun,
+      isVRGDAAuction: isVRGDANounId,
       nounderAuction: false,
       nounsdaoAuction: false
     };
@@ -93,6 +163,7 @@ async function getAuctionByIdUncached(
     return auction;
   }
 
+  try {
   const [result, params] = await Promise.all([
     graphQLFetchWithFallback(
       CHAIN_CONFIG.subgraphUrl,
@@ -105,52 +176,19 @@ async function getAuctionByIdUncached(
 
   const auction = result?.auction;
   if (!auction) {
+    const onchain = await getOnchainAuctionHouseAuction();
+    if (onchain && onchain.nounId === id) return onchain;
     console.error("getAuctionByIdUncached - no auction found", id);
     return undefined;
   }
 
-  const bids: Bid[] = auction.bids.map((bid: any) => ({
-    transactionHash: bid.id as Hex, // Using bid.id as transaction hash
-    bidderAddress: getAddress(bid.bidder.id),
-    amount: bid.amount,
-    timestamp: bid.blockTimestamp,
-    clientId: undefined, // clientId not available in Lil Nouns schema
-  }));
-
-  // Sort descending by amount
-  bids.sort((a, b) => (BigInt(b.amount) > BigInt(a.amount) ? 1 : -1));
-
-  const highestBidAmount =
-    auction.bids.length > 0 ? BigInt(bids[0].amount) : BigInt(0);
-  const nextMinBid = bigIntMax(
-    BigInt(params.reservePrice),
-    highestBidAmount +
-      (highestBidAmount * BigInt(params.minBidIncrementPercentage)) /
-        BigInt(100),
-  );
-
-  const nowS = Date.now() / 1000;
-  const ended = nowS > Number(auction.endTime);
-
-  return {
-    nounId: auction.noun.id,
-
-    startTime: auction.startTime,
-    endTime: auction.endTime,
-
-    nextMinBid: nextMinBid.toString(),
-
-    state: ended
-      ? auction.settled
-        ? "ended-settled"
-        : "ended-unsettled"
-      : "live",
-
-    bids,
-
-    nounderAuction: false,
-    nounsdaoAuction: false,
-  } as Auction;
+  return auctionFromSubgraph(auction, params);
+  } catch (error) {
+    const onchain = await getOnchainAuctionHouseAuction();
+    if (onchain && onchain.nounId === id) return onchain;
+    console.error("getAuctionByIdUncached - no auction found", id, error);
+    return undefined;
+  }
 }
 
 const getAuctionByIdCached = unstable_cache(

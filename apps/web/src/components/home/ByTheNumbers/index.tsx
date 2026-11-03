@@ -115,6 +115,10 @@ function TreasuryDataWrapper({ variant }: { variant: TreasuryCardVariant }) {
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
   });
 
+  if (variant === TreasuryCardVariant.Digest) {
+    return <TreasuryDigestCard className="h-full" />;
+  }
+
   // Show loading state while any data is loading
   if (!currentAuctionId || !treasurySummary || !executedProposals || uniqueNounOwners === undefined) {
     return (
@@ -128,16 +132,6 @@ function TreasuryDataWrapper({ variant }: { variant: TreasuryCardVariant }) {
 
   // Use actual unique noun owners count from VPS, excluding burn address
   const nounOwners = uniqueNounOwners;
-
-  if (variant === TreasuryCardVariant.Digest) {
-    return (
-      <TreasuryDigestCard
-        className={"h-full"}
-        treasuryDeployedUsd={treasurySummary.propSpendInUsd}
-        treasuryBalanceInUsd={treasurySummary.treasuryBalanceInUsd}
-      />
-    );
-  }
 
   return (
     <ByTheNumbersData

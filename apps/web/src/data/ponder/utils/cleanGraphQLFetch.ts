@@ -21,6 +21,10 @@ export async function cleanGraphQLFetch<TResult, TVariables>(
     ? []
     : [variables: TVariables]
 ): Promise<TResult> {
+  if (!CLEAN_GRAPHQL_ENDPOINT) {
+    throw new Error("Indexer is not configured for this network");
+  }
+
   const response = await fetch(CLEAN_GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: {

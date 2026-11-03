@@ -92,7 +92,8 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0', // Allow access via subdomain (sepolia.localhost)
-    open: true,
+    allowedHosts: ['localhost', 'sepolia.localhost', '.localhost'],
+    open: false,
     hmr: {
       port: 3000, // Use same port for HMR to avoid connection issues
       host: 'localhost', // HMR should connect via localhost

@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { useAccount } from "wagmi";
 import { encodeFunctionData, Hex, getAddress } from "viem";
 import { CHAIN_CONFIG } from "@/config";
-import { nounsDaoLogicConfig } from "@/data/generated/wagmi";
+import { nounsDoaLogicAbi } from "@/abis/nounsDoaLogic";
 import {
   UseSendTransactionReturnType,
   useSendTransaction,
@@ -100,7 +100,7 @@ export function useUpdateProposal(): UseUpdateProposalReturnType {
       } else {
         // Proposals without signers can use updateProposal
         data = encodeFunctionData({
-          abi: nounsDaoLogicConfig.abi,
+          abi: nounsDoaLogicAbi,
           functionName: "updateProposal",
           args: [
             BigInt(proposal.id),

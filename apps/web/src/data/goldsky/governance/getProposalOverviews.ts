@@ -87,6 +87,7 @@ function getGoldskyUrl(daoType: DaoType): string {
 export async function getProposalOverviews(limit: number = 500, daoType: DaoType = 'lilnouns'): Promise<ProposalOverview[]> {
   try {
     const goldskyUrl = getGoldskyUrl(daoType);
+    if (!goldskyUrl) return [];
     console.log('[getProposalOverviews] Fetching proposals from Goldsky:', goldskyUrl, 'daoType:', daoType);
     
     const data = await graphQLFetch(
@@ -137,6 +138,7 @@ export async function getProposalOverviews(limit: number = 500, daoType: DaoType
 export async function getProposalOverviewsDigest(limit: number = 500, daoType: DaoType = 'lilnouns'): Promise<ProposalOverview[]> {
   try {
     const goldskyUrl = getGoldskyUrl(daoType);
+    if (!goldskyUrl) return [];
     console.log('[getProposalOverviewsDigest] Fetching proposals from Goldsky:', goldskyUrl, 'daoType:', daoType);
     
     const data = await graphQLFetch(

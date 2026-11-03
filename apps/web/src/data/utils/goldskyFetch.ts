@@ -17,6 +17,9 @@ export const goldskyFetch = async <T>(
   // The chainId parameter is accepted for future use if explicit chain selection is needed
   const config = CHAIN_CONFIG;
   const url = config.goldskyUrl.primary;
+  if (!url) {
+    throw new Error("Goldsky is not configured for this network");
+  }
   
   try {
     const response = await fetch(url, {
@@ -46,6 +49,9 @@ export const goldskyFetch = async <T>(
     console.error("Goldsky fetch error:", error);
     
     // Fallback to secondary URL
+    if (!config.goldskyUrl.fallback) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
     try {
       const fallbackResponse = await fetch(config.goldskyUrl.fallback, {
         method: "POST",

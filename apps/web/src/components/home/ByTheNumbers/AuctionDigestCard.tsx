@@ -13,6 +13,8 @@ import { formatEther } from "viem";
 import { isSepoliaNetwork } from "@/utils/networkDetection";
 import { mainnet, sepolia } from "viem/chains";
 import { transformVpsNounToNoun } from "@/data/noun/helpers";
+import { hasLilVrgda } from "@/utils/vrgdaUtils";
+import { getOnchainNouns, usesOnchainData } from "@/data/sepolia/onchain";
 
 type AuctionDigestCardProps = {
   className?: string;
@@ -30,6 +32,7 @@ const AuctionDigestCard: React.FC<AuctionDigestCardProps> = ({
 
   const { data: currentVRGDANoun } = useQuery({
     queryKey: ["vrgda-current-noun", chainId],
+    enabled: hasLilVrgda(),
     queryFn: async () => {
       // Get the correct chain config dynamically
       const config = CHAIN_SPECIFIC_CONFIGS[chainId];
@@ -98,6 +101,11 @@ const AuctionDigestCard: React.FC<AuctionDigestCardProps> = ({
   const { data: featured } = useQuery({
     queryKey: ["featured-lilnouns", FEATURED_IDS.join(","), chainId],
     queryFn: async () => {
+      if (usesOnchainData()) {
+        const nouns = await getOnchainNouns();
+        return nouns.map((noun) => ({ noun, soldForEth: undefined as number | undefined }));
+      }
+
       // Get the correct chain config dynamically
       const config = CHAIN_SPECIFIC_CONFIGS[chainId];
       

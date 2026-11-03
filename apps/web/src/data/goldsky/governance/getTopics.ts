@@ -2,6 +2,7 @@ import { graphQLFetch } from "@/data/utils/graphQLFetch";
 import { CHAIN_CONFIG, NOUNS_DAO_GOLDSKY_URL } from "@/config";
 import { getAddress } from "viem";
 import { getTopicsOnchain } from "@/data/nounsDaoData/getTopicsOnchain";
+import { attachEncodedReplies } from "./parseEncodedFeedback";
 
 // Helpers to resolve endpoints (prefer Goldsky, fallback to The Graph)
 const getGoldskyUrls = () => CHAIN_CONFIG.goldskyUrl;
@@ -57,16 +58,6 @@ const batchFeedbackQuery = `
       }
       support
       reason
-      voteReplies {
-        reply
-        quotedReason
-        replyVote {
-          id
-          voter { id }
-          support
-          reason
-        }
-      }
       createdTimestamp
       createdBlock
       createdTransactionHash
@@ -424,7 +415,7 @@ export async function getTopics(limit: number = 1000): Promise<Topic[]> {
           lastUpdatedTimestamp: parseInt(topic.lastUpdatedTimestamp),
           lastUpdatedBlock: parseInt(topic.lastUpdatedBlock),
           lastUpdatedTransactionHash: topic.lastUpdatedTransactionHash,
-          feedback: allFeedback[topic.id] || [],
+          feedback: attachEncodedReplies(allFeedback[topic.id] || []),
           signatures: allSignatures[topic.id] || [],
         };
       })
@@ -517,7 +508,7 @@ export async function getTopic(id: string): Promise<Topic | null> {
         { cache: "no-cache" }
       ) as TopicFeedbackResponse;
 
-      feedback = (feedbackData?.topicFeedbacks || []).map(fb => ({
+      feedback = attachEncodedReplies((feedbackData?.topicFeedbacks || []).map(fb => ({
         id: fb.id,
         voterAddress: fb.voter.id,
         support: fb.support,
@@ -525,7 +516,7 @@ export async function getTopic(id: string): Promise<Topic | null> {
         createdTimestamp: parseInt(fb.createdTimestamp),
         createdBlock: parseInt(fb.createdBlock),
         createdTransactionHash: fb.createdTransactionHash,
-      }));
+      })));
     } catch (error) {
       console.error('Failed to fetch feedback for topic:', error);
     }

@@ -67,15 +67,15 @@ const CONTRACTS_BY_CHAIN = {
   },
   [sepolia.id]: {
     dao: {
-      address: '0xa7C37f79ff5E6F932147fC69724B6ED432CA6Aa7' as Address, // Nouns DAO Proxy (V2)
+      address: '0x204b38EF237fb3C1433313cA2b0f69F40Fda142F' as Address,
       chainId: sepolia.id
     },
     executor: {
-      address: '0xE54f098b1880C536e0083720922b8a365FB403DC' as Address, // Timelock/Executor
+      address: '0x73db56FdA5ca18a51fc7422E893ef83b83772833' as Address,
       chainId: sepolia.id
     },
     token: {
-      address: '0x6e48e79f718776CF412a87e047722dBFda5B465D' as Address, // Nouns Token
+      address: '0x1bCcE5eC2A785E7e9807766c4dbB72aB4a0014Cf' as Address,
       chainId: sepolia.id
     },
     payer: {

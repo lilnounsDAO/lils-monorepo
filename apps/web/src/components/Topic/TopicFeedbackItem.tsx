@@ -10,7 +10,6 @@ import MarkdownRenderer from "../MarkdownRenderer";
 import { formatTimeLeft } from "@/utils/format";
 import { useCandidateFeedbackContext } from "./TopicFeedbackProvider";
 import ExpandableContent from "../ExpandableContent";
-import { VoteValue } from "@/data/generated/ponder/graphql";
 
 interface CandidateFeedbackItemProps {
   feedback: FeedbackPost;
@@ -35,12 +34,6 @@ export default function CandidateFeedbackItem({
       case 2: return "Comment";
       default: return "";
     }
-  };
-
-  const supportToValue = (support?: number | null): VoteValue => {
-    if (support === 1) return VoteValue.For;
-    if (support === 0) return VoteValue.Against;
-    return VoteValue.Abstain;
   };
 
   const getSupportColor = () => {
@@ -85,35 +78,17 @@ export default function CandidateFeedbackItem({
           {/* TODO: Add Etherscan link */}
         </div>
 
-        {/* {feedback.voteRevotes?.map(({ revote }, i) =>
-          revote ? (
-            <Revote
-              revoteVoterAddress={revote.voter.id}
-              revoteReason={revote.reason ?? ""}
-              revoteValue={supportToValue(feedback.support)}
-              key={i}
-            />
-          ) : null,
-        )}
-
         {feedback.voteReplies?.map(({ replyVote, reply }, i) =>
           replyVote ? (
-            // <ReplyDisplay
-            //   voterAddress={replyVote.voter.id}
-            //   reason={replyVote.reason ?? ""}
-            //   support={replyVote.support ?? feedback.support}
-            //   reply={reply}
-            //   key={i}
-            // />
-            <Reply
+            <ReplyDisplay
               voterAddress={replyVote.voter.id}
               reason={replyVote.reason ?? ""}
-              value={supportToValue(1)}
+              support={replyVote.support ?? feedback.support}
               reply={reply}
               key={i}
             />
           ) : null,
-        )} */}
+        )}
 
         <ExpandableContent maxCollapsedHeight={80}>
           <MarkdownRenderer>{feedback.reason ?? ""}</MarkdownRenderer>
@@ -199,52 +174,6 @@ function ReplyDisplay({
               </ExpandableContent>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Reply({
-  voterAddress,
-  reason,
-  value,
-  reply,
-}: {
-  voterAddress: string;
-  reason: string;
-  value: VoteValue;
-  reply: string;
-}) {
-  return (
-    <div>
-       <div className="flex w-full min-w-0 flex-col gap-1 overflow-hidden rounded-[12px] border px-3 py-2">
-      <div className="flex gap-1">
-        <EnsAvatar address={getAddress(voterAddress)} size={20} />
-        <EnsName address={getAddress(voterAddress)} />
-        <span
-          className={clsx({
-            "text-semantic-positive": value === VoteValue.For,
-            "text-semantic-negative": value === VoteValue.Against,
-            "text-content-secondary": value === VoteValue.Abstain,
-          })}
-        >
-          ({value.toLowerCase()})
-        </span>
-      </div>
-
-      <ExpandableContent maxCollapsedHeight={40}>
-        <MarkdownRenderer>{reason}</MarkdownRenderer>
-      </ExpandableContent>
-    </div>
-      <div className="flex gap-2">
-        <div className="relative w-[20px] shrink-0">
-          <div className="absolute right-0 top-0 h-[19px] w-[7px] rounded-bl-[12px] border-b border-l"></div>
-        </div>
-        <div className="pt-2">
-          <ExpandableContent maxCollapsedHeight={40}>
-            <MarkdownRenderer>{reply}</MarkdownRenderer>
-          </ExpandableContent>
         </div>
       </div>
     </div>

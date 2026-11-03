@@ -2,9 +2,41 @@ import { graphQLFetch } from "@/data/utils/graphQLFetch";
 import { CHAIN_CONFIG } from "@/config";
 import { ProposalIdea } from "./ideaTypes";
 import { getAddress } from "viem";
+import { isSepoliaNetwork } from "@/utils/networkDetection";
+import { attachEncodedReplies } from "./parseEncodedFeedback";
 
 // Use dynamic Goldsky URL based on current network (mainnet or sepolia)
 const getGoldskyUrl = () => CHAIN_CONFIG.goldskyUrl.primary;
+
+const SPONSOR_SIG_FIELDS = `
+  id
+  sig
+  signer {
+    id
+    nounsRepresented {
+      id
+    }
+  }
+  expirationTimestamp
+  canceled
+  reason
+  createdTimestamp
+`;
+
+const REHEARSAL_SPONSOR_SIG_FIELDS = `
+  id
+  sig
+  signer {
+    id
+    nouns {
+      id
+    }
+  }
+  expirationTimestamp
+  canceled
+  reason
+  createdTimestamp
+`;
 
 const query = `
   query GetProposalCandidates($first: Int = 1000) {
@@ -35,18 +67,49 @@ const query = `
           proposalIdToUpdate
           matchingProposalIds
           contentSignatures(where: { canceled: false }) {
-            id
-            sig
-            signer {
-              id
-              nounsRepresented {
-                id
-              }
-            }
-            expirationTimestamp
-            canceled
-            reason
-            createdTimestamp
+            ${SPONSOR_SIG_FIELDS}
+          }
+        }
+      }
+      versions {
+        id
+        createdTimestamp
+      }
+    }
+  }
+`;
+
+// Rehearsal 0.1.4: tx sigs are functionSignatures; sponsor sigs are content.signatures
+const rehearsalQuery = `
+  query GetProposalCandidates($first: Int = 1000) {
+    proposalCandidates(
+      first: $first
+      orderBy: createdTimestamp
+      orderDirection: desc
+    ) {
+      id
+      proposer
+      slug
+      createdTimestamp
+      canceledTimestamp
+      lastUpdatedTimestamp
+      canceled
+      latestVersion {
+        id
+        createdTimestamp
+        updateMessage
+        content {
+          id
+          title
+          description
+          targets
+          values
+          functionSignatures
+          calldatas
+          proposalIdToUpdate
+          matchingProposalIds
+          signatures(where: { canceled: false }) {
+            ${REHEARSAL_SPONSOR_SIG_FIELDS}
           }
         }
       }
@@ -91,6 +154,29 @@ const batchFeedbackQuery = `
   }
 `;
 
+const rehearsalBatchFeedbackQuery = `
+  query GetBatchCandidateFeedback($candidateIds: [ID!]!) {
+    candidateFeedbacks(
+      where: {
+        candidate_in: $candidateIds
+      }
+      orderBy: createdTimestamp
+      orderDirection: desc
+    ) {
+      id
+      candidate {
+        id
+      }
+      voter {
+        id
+      }
+      support
+      reason
+      createdTimestamp
+    }
+  }
+`;
+
 const feedbackQuery = `
   query GetCandidateFeedback($candidateId: ID!) {
     candidateFeedbacks(
@@ -105,6 +191,26 @@ const feedbackQuery = `
         id
       }
       supportDetailed
+      reason
+      createdTimestamp
+    }
+  }
+`;
+
+const rehearsalFeedbackQuery = `
+  query GetCandidateFeedback($candidateId: ID!) {
+    candidateFeedbacks(
+      where: {
+        candidate: $candidateId
+      }
+      orderBy: createdTimestamp
+      orderDirection: desc
+    ) {
+      id
+      voter {
+        id
+      }
+      support
       reason
       createdTimestamp
     }
@@ -130,16 +236,30 @@ interface ProposalCandidatesResponse {
         description: string;
         targets: string[];
         values: string[];
-        signatures: string[];
+        signatures?: string[] | Array<{
+          id: string;
+          sig: string;
+          signer: {
+            id: string;
+            nounsRepresented?: Array<{ id: string }>;
+            nouns?: Array<{ id: string }>;
+          };
+          expirationTimestamp: string;
+          canceled: boolean;
+          reason: string;
+          createdTimestamp: string;
+        }>;
+        functionSignatures?: string[];
         calldatas: string[];
         proposalIdToUpdate: string;
         matchingProposalIds: string[];
-        contentSignatures: Array<{
+        contentSignatures?: Array<{
           id: string;
           sig: string;
           signer: {
             id: string;
               nounsRepresented?: Array<{ id: string }>;
+              nouns?: Array<{ id: string }>;
           };
           expirationTimestamp: string;
           canceled: boolean;
@@ -164,7 +284,8 @@ interface CandidateFeedbackResponse {
     voter: {
       id: string;
     };
-    supportDetailed: number;
+    supportDetailed?: number;
+    support?: number;
     reason: string | null;
     voteReplies?: Array<{
       reply: string;
@@ -180,15 +301,56 @@ interface CandidateFeedbackResponse {
   }>;
 }
 
+type SponsorSigRaw = NonNullable<
+  ProposalCandidatesResponse["proposalCandidates"][0]["latestVersion"]["content"]["contentSignatures"]
+>[number];
+
+function isRehearsalSchema() {
+  return isSepoliaNetwork();
+}
+
+function mapSponsorSignatures(content: ProposalCandidatesResponse["proposalCandidates"][0]["latestVersion"]["content"]) {
+  const raw: SponsorSigRaw[] = content.contentSignatures
+    || (Array.isArray(content.signatures) && typeof content.signatures[0] === "object"
+      ? content.signatures as SponsorSigRaw[]
+      : []);
+
+  return raw.map((sig) => ({
+    sig: sig.sig,
+    signer: {
+      id: sig.signer.id,
+      nounsRepresented: (sig.signer.nounsRepresented || sig.signer.nouns || []).map((n) => ({ id: n.id })),
+    },
+    expirationTimestamp: parseInt(sig.expirationTimestamp),
+    canceled: sig.canceled,
+    status: sig.canceled ? "canceled" as const :
+      parseInt(sig.expirationTimestamp) * 1000 < Date.now() ? "expired" as const :
+      "valid" as const,
+  }));
+}
+
+function txSignatures(content: ProposalCandidatesResponse["proposalCandidates"][0]["latestVersion"]["content"]) {
+  if (content.functionSignatures) return content.functionSignatures;
+  if (Array.isArray(content.signatures) && typeof content.signatures[0] === "string") {
+    return content.signatures as string[];
+  }
+  return [];
+}
+
+function feedbackSupport(fb: { supportDetailed?: number; support?: number }) {
+  return fb.supportDetailed ?? fb.support ?? 0;
+}
+
 export async function getProposalIdeas(limit: number = 1000): Promise<ProposalIdea[]> {
   try {
     const goldskyUrl = getGoldskyUrl();
+    if (!goldskyUrl) return [];
     console.log('[getProposalIdeas] Fetching candidates from Goldsky:', goldskyUrl);
     
     // Fetch candidates from Nouns DAO Goldsky subgraph
     const data = await graphQLFetch(
       goldskyUrl,
-      query,
+      isRehearsalSchema() ? rehearsalQuery : query,
       { first: limit },
       { cache: "no-cache" }
     ) as ProposalCandidatesResponse;
@@ -213,7 +375,7 @@ export async function getProposalIdeas(limit: number = 1000): Promise<ProposalId
     try {
       const feedbackData = await graphQLFetch(
         getGoldskyUrl(),
-        batchFeedbackQuery,
+        isRehearsalSchema() ? rehearsalBatchFeedbackQuery : batchFeedbackQuery,
         { candidateIds },
         { cache: "no-cache" }
       ) as CandidateFeedbackResponse;
@@ -230,7 +392,7 @@ export async function getProposalIdeas(limit: number = 1000): Promise<ProposalId
         allFeedback[fb.candidate.id].push({
           id: fb.id,
           voterAddress: fb.voter.id,
-          support: fb.supportDetailed,
+          support: feedbackSupport(fb),
           reason: fb.reason || '',
           voteReplies: fb.voteReplies?.map((vr) => ({
             reply: vr.reply,
@@ -238,7 +400,7 @@ export async function getProposalIdeas(limit: number = 1000): Promise<ProposalId
             replyVote: {
               id: vr.replyVote.id,
               voter: { id: vr.replyVote.voter.id },
-              support: vr.replyVote.supportDetailed ?? fb.supportDetailed,
+              support: vr.replyVote.supportDetailed ?? feedbackSupport(fb),
               reason: vr.replyVote.reason ?? '',
             },
           })) || [],
@@ -253,24 +415,11 @@ export async function getProposalIdeas(limit: number = 1000): Promise<ProposalId
     // Convert candidates to ideas format
     const ideas = data.proposalCandidates.map((candidate) => {
         // Get feedback for this candidate from the batch result
-        const feedbackPosts = allFeedback[candidate.id] || [];
+        const feedbackPosts = attachEncodedReplies(allFeedback[candidate.id] || []);
 
-        // Map signatures
-        const contentSignatures = (candidate.latestVersion.content.contentSignatures || []).map(sig => ({
-          sig: sig.sig,
-          signer: {
-            id: sig.signer.id,
-            nounsRepresented: (sig.signer.nounsRepresented || []).map(n => ({ id: n.id })),
-          },
-          expirationTimestamp: parseInt(sig.expirationTimestamp),
-          canceled: sig.canceled,
-          status: sig.canceled ? 'canceled' as const : 
-                   parseInt(sig.expirationTimestamp) * 1000 < Date.now() ? 'expired' as const : 
-                   'valid' as const,
-        }));
+        const contentSignatures = mapSponsorSignatures(candidate.latestVersion.content);
 
-        // Handle proposer as string (Bytes in schema)
-        const proposerAddress = candidate.proposer;
+        const proposerAddress = candidate.proposer || candidate.id.split("-")[0];
 
         return {
           id: candidate.id,
@@ -288,7 +437,7 @@ export async function getProposalIdeas(limit: number = 1000): Promise<ProposalId
               description: candidate.latestVersion.content.description,
               targets: candidate.latestVersion.content.targets,
               values: candidate.latestVersion.content.values.map(v => v.toString()),
-              signatures: candidate.latestVersion.content.signatures,
+              signatures: txSignatures(candidate.latestVersion.content),
               calldatas: candidate.latestVersion.content.calldatas,
             },
             targetProposalId: candidate.latestVersion.content.proposalIdToUpdate && 
@@ -350,18 +499,44 @@ const singleCandidateQuery = `
           proposalIdToUpdate
           matchingProposalIds
           contentSignatures(where: { canceled: false }) {
-            id
-            sig
-            signer {
-              id
-              nounsRepresented {
-                id
-              }
-            }
-            expirationTimestamp
-            canceled
-            reason
-            createdTimestamp
+            ${SPONSOR_SIG_FIELDS}
+          }
+        }
+      }
+      versions {
+        id
+        createdTimestamp
+      }
+    }
+  }
+`;
+
+const rehearsalSingleCandidateQuery = `
+  query GetProposalCandidate($id: ID!) {
+    proposalCandidate(id: $id) {
+      id
+      proposer
+      slug
+      createdTimestamp
+      canceledTimestamp
+      lastUpdatedTimestamp
+      canceled
+      latestVersion {
+        id
+        createdTimestamp
+        updateMessage
+        content {
+          id
+          title
+          description
+          targets
+          values
+          functionSignatures
+          calldatas
+          proposalIdToUpdate
+          matchingProposalIds
+          signatures(where: { canceled: false }) {
+            ${REHEARSAL_SPONSOR_SIG_FIELDS}
           }
         }
       }
@@ -381,7 +556,7 @@ export async function getProposalIdea(id: string): Promise<ProposalIdea | null> 
     // Fetch single candidate from Nouns DAO Goldsky subgraph
     const data = await graphQLFetch(
       getGoldskyUrl(),
-      singleCandidateQuery,
+      isRehearsalSchema() ? rehearsalSingleCandidateQuery : singleCandidateQuery,
       { id },
       { cache: "no-cache" }
     ) as { proposalCandidate: ProposalCandidatesResponse['proposalCandidates'][0] | null };
@@ -401,41 +576,26 @@ export async function getProposalIdea(id: string): Promise<ProposalIdea | null> 
     try {
       const feedbackData = await graphQLFetch(
         getGoldskyUrl(),
-        feedbackQuery,
+        isRehearsalSchema() ? rehearsalFeedbackQuery : feedbackQuery,
         { candidateId: candidate.id },
         { cache: "no-cache" }
       ) as CandidateFeedbackResponse;
       
-      feedbackPosts = (feedbackData?.candidateFeedbacks || []).map(fb => ({
+      feedbackPosts = attachEncodedReplies((feedbackData?.candidateFeedbacks || []).map(fb => ({
         id: fb.id,
         voterAddress: fb.voter.id,
-        support: fb.supportDetailed,
+        support: feedbackSupport(fb),
         reason: fb.reason || '',
         votes: 0, // Votes not available in schema
         createdTimestamp: parseInt(fb.createdTimestamp),
-      }));
+      })));
     } catch (error) {
       console.error('Failed to fetch feedback for candidate:', error);
     }
 
-    // Map signatures
-    console.log('[getProposalIdea] Raw signatures from subgraph:', candidate.latestVersion.content.contentSignatures);
-    const contentSignatures = (candidate.latestVersion.content.contentSignatures || []).map(sig => ({
-      sig: sig.sig,
-      signer: {
-        id: sig.signer.id,
-        nounsRepresented: (sig.signer.nounsRepresented || []).map(n => ({ id: n.id })),
-      },
-      expirationTimestamp: parseInt(sig.expirationTimestamp),
-      canceled: sig.canceled,
-      status: sig.canceled ? 'canceled' as const : 
-               parseInt(sig.expirationTimestamp) * 1000 < Date.now() ? 'expired' as const : 
-               'valid' as const,
-    }));
-    console.log('[getProposalIdea] Mapped signatures:', contentSignatures);
+    const contentSignatures = mapSponsorSignatures(candidate.latestVersion.content);
 
-    // Handle proposer as string (Bytes in schema)
-    const proposerAddress = candidate.proposer;
+    const proposerAddress = candidate.proposer || candidate.id.split("-")[0];
     
     if (!proposerAddress) {
       console.error('[getProposalIdea] Missing proposer address for candidate:', candidate.id);
@@ -458,7 +618,7 @@ export async function getProposalIdea(id: string): Promise<ProposalIdea | null> 
           description: candidate.latestVersion.content.description,
           targets: candidate.latestVersion.content.targets,
           values: candidate.latestVersion.content.values.map(v => v.toString()),
-          signatures: candidate.latestVersion.content.signatures,
+          signatures: txSignatures(candidate.latestVersion.content),
           calldatas: candidate.latestVersion.content.calldatas,
         },
         targetProposalId: candidate.latestVersion.content.proposalIdToUpdate && 

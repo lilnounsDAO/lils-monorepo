@@ -37,7 +37,12 @@ export function NounImageBase({
   className,
   ...props
 }: { noun?: Noun } & Omit<ImageProps, "src" | "alt">) {
-  const imageSrc = noun ? buildNounImage(noun.traits, "full") : undefined;
+  let imageSrc: string | undefined;
+  try {
+    imageSrc = noun ? buildNounImage(noun.traits, "full") : undefined;
+  } catch (error) {
+    console.error("NounImageBase failed to render", noun?.id, error);
+  }
   return (
     <Image
       src={imageSrc ?? "/noun-loading-skull.gif"}

@@ -1,6 +1,6 @@
 "use client";
 import { motion, MotionConfig } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SlideButton } from './SlideButton';
 import { CompactVRGDAExplorer } from './CompactVRGDAExplorer';
 import { useQuery } from "@tanstack/react-query";
@@ -9,6 +9,8 @@ import { isVRGDANoun } from "@/utils/vrgdaUtils";
 import AuctionClient from "./AuctionClient";
 import VRGDAClient from "./VRGDAClient";
 import { Suspense } from "react";
+import { isSepoliaNetwork } from "@/utils/networkDetection";
+import { useMinterMode } from "@/hooks/useMinterMode";
 
 interface SlidingAuctionContainerProps {
   initialAuctionId?: string;
@@ -24,9 +26,21 @@ export const SlidingAuctionContainer = ({ initialAuctionId }: SlidingAuctionCont
     enabled: !initialAuctionId,
   });
 
+  const { data: minterMode } = useMinterMode();
+  const isSepolia = isSepoliaNetwork();
   const auctionId = initialAuctionId || currentAuctionId;
   const auctionIdNum = auctionId ? parseInt(auctionId) : undefined;
-  const isVRGDA = auctionIdNum ? isVRGDANoun(auctionIdNum) : false;
+  const isVRGDA = isSepolia
+    ? minterMode === "vrgda"
+    : auctionIdNum
+      ? isVRGDANoun(auctionIdNum)
+      : false;
+  const showVrgdaChrome = !isSepolia || isVRGDA;
+
+  useEffect(() => {
+    if (!isSepolia || !minterMode) return;
+    setActiveCard(minterMode === "vrgda" ? 0 : 1);
+  }, [isSepolia, minterMode]);
 
   // Custom easing for smooth, polished transitions
   const customEasing = [0.25, 0.1, 0.25, 1];
@@ -150,7 +164,7 @@ export const SlidingAuctionContainer = ({ initialAuctionId }: SlidingAuctionCont
             activeCard === 0 ? 'min-h-[700px] md:min-h-[650px]' : 'min-h-[593px] md:min-h-[477px]'
           }`}>
             
-            {/* VRGDA Pool Card - Can be primary or nested beneath */}
+            {showVrgdaChrome && (
             <motion.div
               className="absolute top-0 left-0 w-full h-full"
               variants={cardVariants}
@@ -158,6 +172,7 @@ export const SlidingAuctionContainer = ({ initialAuctionId }: SlidingAuctionCont
             >
               <CompactVRGDAExplorer />
             </motion.div>
+            )}
 
             {/* Auction Card - Can be primary or nested beneath */}
             <motion.div
@@ -179,12 +194,13 @@ export const SlidingAuctionContainer = ({ initialAuctionId }: SlidingAuctionCont
           </div>
         </div>
 
-        {/* Slide Button - positioned to trigger card transitions */}
+        {showVrgdaChrome && (
         <SlideButton 
           activeCard={activeCard}
           onCardChange={handleCardChange}
           onHover={handleButtonHover}
         />
+        )}
       </div>
     </MotionConfig>
   );
