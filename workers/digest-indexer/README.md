@@ -43,5 +43,9 @@ Schema is applied on boot, and the cursors in `digest.cursor` make restarts resu
 To rebuild, run `DROP SCHEMA digest CASCADE` and restart. A full backfill takes
 about 1 minute for subgraph data and about 10 minutes for mints.
 
+Public route: `https://db.lilnouns.wtf/api/digest`, via nginx with a 15s shared
+cache, 5 req/s per IP (burst 20), GET only, and CORS limited to lilnouns.wtf
+and Netlify previews. The config lives in `nginx/`. `/health` stays local to the VPS.
+
 The web app uses it when `VITE_DIGEST_API_URL` is set. Otherwise it falls back
 to querying the subgraph from the browser.
