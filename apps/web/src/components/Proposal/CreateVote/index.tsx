@@ -31,6 +31,7 @@ import { X } from "lucide-react";
 import { VoteValue } from "@/data/generated/ponder/graphql";
 import { HTMLAttributes, useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
+import { useSearchParams } from "react-router-dom";
 import { useReadNounsNftTokenGetPriorVotes } from "@/data/generated/wagmi";
 import { useScreenSize } from "@/hooks/useScreenSize";
 
@@ -65,7 +66,32 @@ export function CreateVote({ proposal }: { proposal: DetailedProposal }) {
     },
   });
 
-  const { replies: replyVotes, revotes } = useCreateVoteContext();
+  const {
+    replies: replyVotes,
+    revotes,
+    addReply,
+    addRevote,
+  } = useCreateVoteContext();
+
+  // Digest links here with ?reply=<voteId> or ?revote=<voteId>: attach that
+  // vote once the proposal's votes have loaded, then drop the param.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const replyId = searchParams.get("reply");
+    const revoteId = searchParams.get("revote");
+    if (!replyId && !revoteId) return;
+    const find = (id: string | null) =>
+      id ? proposal.votes.find((vote) => vote.id === id) : undefined;
+    const replyTo = find(replyId);
+    const revoteOf = find(revoteId);
+    if (!replyTo && !revoteOf) return;
+    if (replyTo) addReply(replyTo);
+    if (revoteOf) addRevote(revoteOf);
+    const next = new URLSearchParams(searchParams);
+    next.delete("reply");
+    next.delete("revote");
+    setSearchParams(next, { replace: true });
+  }, [proposal.votes, searchParams, setSearchParams, addReply, addRevote]);
   const {
     castRefundableVote,
     error,
