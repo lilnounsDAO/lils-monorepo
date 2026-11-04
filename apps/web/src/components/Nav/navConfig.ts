@@ -13,11 +13,19 @@ export interface NavProps {
   items: NavItem[];
 }
 
-// Digest, and the governance dropdown that opened it, stay out of the nav
-// until that feed is indexed, cached, and stored on the VPS.
 const ALL_DESKTOP_NAV_ITEMS: NavItem[] = [
   { name: "Explore", icon: "layers", href: "/explore" },
-  { name: "Governance", icon: "clock", href: "/vote" },
+  {
+    name: "Governance",
+    icon: "clock",
+    href: "/digest",
+    children: [
+      { name: "Digest", icon: "clock", href: "/digest" },
+      { name: "Proposals", icon: "vote", href: "/vote" },
+      { name: "Candidates", icon: "vote", href: "/candidates" },
+      { name: "Topics", icon: "lightning", href: "/topics" },
+    ],
+  },
   { name: "Learn", icon: "book", href: "/learn" },
 ];
 

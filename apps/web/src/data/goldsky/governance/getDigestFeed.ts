@@ -11,6 +11,7 @@ const ZERO = zeroAddress.toLowerCase();
 export type DigestFeedFilter =
   | "all"
   | "proposals"
+  | "votes"
   | "candidates"
   | "topics"
   | "market"
@@ -20,6 +21,7 @@ export type DigestEventKind =
   | "vote"
   | "proposal-created"
   | "voting-started"
+  | "closing-soon"
   | "proposal-concluded"
   | "proposal-feedback"
   | "candidate-created"
@@ -28,11 +30,13 @@ export type DigestEventKind =
   | "topic-created"
   | "topic-feedback"
   | "sale"
+  | "mint"
   | "transfer"
   | "delegate";
 
 export type DigestConclusion =
   | "passed"
+  | "queued"
   | "defeated"
   | "canceled"
   | "vetoed"
@@ -58,6 +62,28 @@ export interface DigestEvent {
   topicTitle?: string;
   reason?: string;
   conclusion?: DigestConclusion;
+  endsAt?: number;
+  /** Set when a clustered row went to more than one account. */
+  counterparts?: Address[];
+  replies?: DigestQuote[];
+  revotes?: DigestQuote[];
+  repostCount?: number;
+  replyCount?: number;
+  /** Set by the indexer: the proposal can still be voted on. */
+  votingOpen?: boolean;
+}
+
+export interface DigestQuote {
+  quote: string;
+  body?: string;
+  handle?: string;
+  target?: Address;
+  targetSupport?: number;
+}
+
+export interface DigestPage {
+  events: DigestEvent[];
+  nextCursor: string | null;
 }
 
 const coreQuery = `
@@ -323,33 +349,47 @@ function blockTimestamp(
   return createdTimestamp + (targetBlock - createdBlock) * 12;
 }
 
+const CLUSTER_WINDOW_SECONDS = 1800;
+
+// Same rules as the indexer: merge bursts from one account (transfers,
+// delegations, mints) within 30 minutes, even when other events interleave.
 function groupConsecutive(events: DigestEvent[]): DigestEvent[] {
   const grouped: DigestEvent[] = [];
+  const open = new Map<string, { event: DigestEvent; oldest: number }>();
 
   for (const event of events) {
-    const prev = grouped[grouped.length - 1];
-    const canGroup =
-      prev &&
-      (event.kind === "transfer" || event.kind === "delegate") &&
-      prev.kind === event.kind &&
-      sameAddr(prev.actor, event.actor) &&
-      sameAddr(prev.counterpart, event.counterpart) &&
-      Math.abs(prev.timestamp - event.timestamp) <= 120;
+    const clusterable =
+      event.kind === "transfer" || event.kind === "delegate" || event.kind === "mint";
+    const key = `${event.kind}:${event.actor?.toLowerCase() ?? ""}`;
+    const cluster = clusterable ? open.get(key) : undefined;
 
-    if (canGroup && prev) {
-      prev.nounIds = Array.from(
-        new Set([...(prev.nounIds ?? []), ...(event.nounIds ?? [])]),
+    if (cluster && cluster.oldest - event.timestamp <= CLUSTER_WINDOW_SECONDS) {
+      const target = cluster.event;
+      target.nounIds = Array.from(
+        new Set([...(target.nounIds ?? []), ...(event.nounIds ?? [])]),
       );
+      if (
+        event.counterpart &&
+        !target.counterparts?.some((address) => sameAddr(address, event.counterpart))
+      ) {
+        target.counterparts = [...(target.counterparts ?? []), event.counterpart];
+      }
+      cluster.oldest = event.timestamp;
       continue;
     }
 
-    grouped.push({
+    const copy: DigestEvent = {
       ...event,
       nounIds: event.nounIds ? [...event.nounIds] : undefined,
-    });
+      counterparts: event.counterpart ? [event.counterpart] : undefined,
+    };
+    grouped.push(copy);
+    if (clusterable) open.set(key, { event: copy, oldest: event.timestamp });
   }
 
-  return grouped;
+  return grouped.map((event) =>
+    (event.counterparts?.length ?? 0) > 1 ? event : { ...event, counterparts: undefined },
+  );
 }
 
 export function eventMatchesFilter(
@@ -363,20 +403,75 @@ export function eventMatchesFilter(
         event.kind === "vote" ||
         event.kind === "proposal-created" ||
         event.kind === "voting-started" ||
+        event.kind === "closing-soon" ||
         event.kind === "proposal-concluded" ||
         event.kind === "proposal-feedback"
       );
+    case "votes":
+      return event.kind === "vote";
     case "candidates":
       return event.kind.startsWith("candidate-");
     case "topics":
       return event.kind.startsWith("topic-");
     case "market":
-      return event.kind === "sale" || event.kind === "transfer";
+      return (
+        event.kind === "sale" ||
+        event.kind === "mint" ||
+        event.kind === "transfer"
+      );
     case "delegates":
       return event.kind === "delegate";
     default:
       return true;
   }
+}
+
+// Pre-indexed feed served by services/digest-indexer. Addresses
+// come back lowercased, so checksum them to match the subgraph path.
+function digestApiUrl(): string | undefined {
+  return import.meta.env.VITE_DIGEST_API_URL?.trim() || undefined;
+}
+
+export function hasDigestApi(): boolean {
+  return Boolean(digestApiUrl());
+}
+
+function checksumEvent(event: DigestEvent): DigestEvent {
+  const quotes = (list?: DigestQuote[]) =>
+    list?.map((item) => ({ ...item, target: toAddress(item.target) }));
+  return {
+    ...event,
+    actor: toAddress(event.actor),
+    counterpart: toAddress(event.counterpart),
+    counterparts: event.counterparts
+      ?.map((address) => toAddress(address))
+      .filter((address): address is Address => Boolean(address)),
+    replies: quotes(event.replies),
+    revotes: quotes(event.revotes),
+  };
+}
+
+export async function getDigestPage({
+  filter = "all",
+  search,
+  cursor,
+  limit = 50,
+}: {
+  filter?: DigestFeedFilter;
+  search?: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<DigestPage> {
+  const apiUrl = digestApiUrl();
+  if (!apiUrl) throw new Error("VITE_DIGEST_API_URL is not set");
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (filter !== "all") params.set("filter", filter);
+  if (search) params.set("q", search);
+  if (cursor) params.set("cursor", cursor);
+  const res = await fetch(`${apiUrl}?${params}`);
+  if (!res.ok) throw new Error(`digest API ${res.status}`);
+  const body = (await res.json()) as DigestPage;
+  return { events: body.events.map(checksumEvent), nextCursor: body.nextCursor };
 }
 
 export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> {
@@ -392,6 +487,7 @@ export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> 
 
   const events: DigestEvent[] = [];
   const saleKeys = new Set<string>();
+  const transferKeys = new Set<string>();
   const now = Math.floor(Date.now() / 1000);
 
   for (const vote of core?.votes ?? []) {
@@ -433,6 +529,8 @@ export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> 
   for (const transfer of core?.transferEvents ?? []) {
     const timestamp = Number(transfer.blockTimestamp);
     const nounId = transfer.noun.id;
+    // Delegations emitted by this transfer are echoes; hide them below.
+    transferKeys.add(`${nounId}-${timestamp}`);
     if (saleKeys.has(`${nounId}-${timestamp}`)) continue;
     if (isProtocol(transfer.previousHolder.id)) continue;
     if (sameAddr(transfer.previousHolder.id, transfer.newHolder.id)) continue;
@@ -454,6 +552,7 @@ export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> 
     const timestamp = Number(delegation.blockTimestamp);
     const nounId = delegation.noun.id;
     if (saleKeys.has(`${nounId}-${timestamp}`)) continue;
+    if (transferKeys.has(`${nounId}-${timestamp}`)) continue;
     if (isProtocol(delegation.previousDelegate.id)) continue;
     if (sameAddr(delegation.previousDelegate.id, delegation.newDelegate.id)) continue;
     const actor = toAddress(delegation.previousDelegate.id);

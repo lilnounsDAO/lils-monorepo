@@ -19,6 +19,7 @@ import CandidateDetailPage from './pages/CandidateDetailPage'
 import TopicsPage from './pages/TopicsPage'
 import VotePage from './pages/VotePage'
 import VoteDetailPage from './pages/VoteDetailPage'
+import DigestPage from './pages/DigestPage'
 // import StatsPage from './pages/StatsPage'
 // import TreasuryStatsPage from './pages/TreasuryStatsPage'
 import SuccessPage from './pages/SuccessPage'
@@ -102,7 +103,7 @@ function App() {
               <Route path="explore" element={<ExplorePage />} />
               <Route path="profile" element={<ProposalsPage />} />
               <Route path="profile/:address" element={<ProposalsPage />} />
-              <Route path="digest" element={<Navigate to="/vote" replace />} />
+              <Route path="digest" element={<DigestPage />} />
               <Route path="vote" element={<VotePage />} />
               <Route path="vote/nouns" element={<VotePage />} />
               <Route path="vote/nounsdao" element={<VotePage />} />

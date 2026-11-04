@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_INFURA_API_KEY: string
   readonly VITE_DECENTRALIZED_SUBGRAPH_API_KEY: string
   readonly VITE_INDEXER_URL: string
+  readonly VITE_DIGEST_API_URL?: string
   /** Goldsky URL for the Sepolia carbon-copy rehearsal subgraph. Empty = read contracts. */
   readonly VITE_SEPOLIA_SUBGRAPH_URL?: string
   readonly VITE_CHAIN_ID: string

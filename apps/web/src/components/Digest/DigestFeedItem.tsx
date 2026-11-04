@@ -1,17 +1,24 @@
 import { Link } from "react-router-dom";
+import clsx from "clsx";
+import { MessageCircle, Repeat2 } from "lucide-react";
 import { Address, formatEther } from "viem";
 import { truncate } from "lodash";
 import { EnsAvatar } from "@/components/EnsAvatar";
 import { EnsName } from "@/components/EnsName";
 import { NounImage } from "@/components/NounImage";
 import { formatTimeLeft } from "@/utils/format";
-import { DigestEvent, DigestEventKind } from "@/data/goldsky/governance/getDigestFeed";
+import {
+  DigestEvent,
+  DigestEventKind,
+  DigestQuote,
+} from "@/data/goldsky/governance/getDigestFeed";
 
 type EventFamily = "event-action" | "individual-action" | "event-update";
 
 function familyOf(kind: DigestEventKind): EventFamily {
   switch (kind) {
     case "voting-started":
+    case "closing-soon":
     case "proposal-concluded":
       return "event-action";
     case "proposal-created":
@@ -49,7 +56,10 @@ function supportCopy(support?: number): { label: string; className: string } {
   return { label: "for", className: "text-semantic-positive" };
 }
 
-function conclusionCopy(event: DigestEvent): { label: string; className: string } {
+function conclusionCopy(event: DigestEvent): {
+  label: string;
+  className: string;
+} {
   switch (event.conclusion) {
     case "defeated":
       return { label: "defeated", className: "text-semantic-negative" };
@@ -59,6 +69,11 @@ function conclusionCopy(event: DigestEvent): { label: string; className: string 
       return { label: "vetoed", className: "text-semantic-warning" };
     case "executed":
       return { label: "executed", className: "text-semantic-positive" };
+    case "queued":
+      return {
+        label: "queued for execution",
+        className: "text-semantic-positive",
+      };
     default:
       return { label: "passed", className: "text-semantic-positive" };
   }
@@ -93,6 +108,130 @@ function NounChip({ ids }: { ids?: string[] }) {
   );
 }
 
+function Recipients({ event }: { event: DigestEvent }) {
+  const list = event.counterparts?.length
+    ? event.counterparts
+    : event.counterpart
+      ? [event.counterpart]
+      : [];
+  if (!list.length) return null;
+  const [first, second] = list;
+  return (
+    <>
+      {" "}
+      to <PersonWithAvatar address={first} />
+      {list.length === 2 && second && (
+        <>
+          {" "}
+          and <PersonWithAvatar address={second} />
+        </>
+      )}
+      {list.length > 2 && <> and {list.length - 1} others</>}
+    </>
+  );
+}
+
+// A quoted earlier vote, nouns.camp style: who said it, how they voted, what.
+function QuoteCard({ item }: { item: DigestQuote }) {
+  const support =
+    item.targetSupport !== undefined ? supportCopy(item.targetSupport) : null;
+  return (
+    <div className="mt-1.5 rounded-[10px] border border-gray-200 px-3 py-2 text-sm leading-5">
+      <span className="inline-flex items-center gap-1 align-[-3px] font-bold">
+        {item.target ? (
+          <>
+            <EnsAvatar address={item.target} size={16} />
+            <EnsName address={item.target} />
+          </>
+        ) : (
+          <span>{item.handle ?? "An earlier vote"}</span>
+        )}
+      </span>
+      {support && (
+        <span className={clsx("font-bold", support.className)}>
+          {" "}
+          ({support.label})
+        </span>
+      )}
+      :{" "}
+      <span className="whitespace-pre-line">
+        {truncate(item.quote, { length: 280 })}
+      </span>
+    </div>
+  );
+}
+
+function ReasonBody({ text }: { text?: string }) {
+  if (!text) return null;
+  return (
+    <p className="mt-1 whitespace-pre-line break-words text-content-primary">
+      {text}
+    </p>
+  );
+}
+
+// Body under a vote/feedback: the voter's own words, revotes and replies.
+function VoteBody({ event }: { event: DigestEvent }) {
+  return (
+    <>
+      {event.revotes?.map((item, i) => (
+        <QuoteCard key={`revote-${i}`} item={item} />
+      ))}
+      {event.replies?.map((item, i) => (
+        <div key={`reply-${i}`}>
+          <ReasonBody text={item.body} />
+          <QuoteCard item={item} />
+        </div>
+      ))}
+      <ReasonBody text={event.reason} />
+    </>
+  );
+}
+
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+// Reply / revote open the proposal's vote form with this vote attached.
+function VoteActions({ event }: { event: DigestEvent }) {
+  if (event.kind !== "vote" || !event.proposalId || !event.reason) return null;
+  const canRespond = event.votingOpen === true;
+  const voteId = event.id.replace(/^vote-/, "");
+  const base = `/vote/${event.proposalId}`;
+  const counts = [
+    event.repostCount ? plural(event.repostCount, "repost") : null,
+    event.replyCount
+      ? plural(event.replyCount, "reply").replace("replys", "replies")
+      : null,
+  ].filter(Boolean);
+  if (!canRespond && counts.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {canRespond && (
+        <div className="flex items-center gap-4 text-content-secondary">
+          <Link
+            to={`${base}?reply=${voteId}`}
+            aria-label="Reply"
+            className="hover:text-content-primary"
+          >
+            <MessageCircle size={18} />
+          </Link>
+          <Link
+            to={`${base}?revote=${voteId}`}
+            aria-label="Revote"
+            className="hover:text-content-primary"
+          >
+            <Repeat2 size={18} />
+          </Link>
+        </div>
+      )}
+      {counts.length > 0 && (
+        <p className="text-sm text-content-secondary">{counts.join(" · ")}</p>
+      )}
+    </div>
+  );
+}
+
 function Title({ event }: { event: DigestEvent }) {
   return (
     <>
@@ -109,7 +248,15 @@ function EventSentence({ event }: { event: DigestEvent }) {
     case "voting-started":
       return (
         <>
-          Voting for Proposal {event.proposalId}: <Title event={event} /> started
+          Voting for Proposal {event.proposalId}: <Title event={event} />{" "}
+          started
+        </>
+      );
+    case "closing-soon":
+      return (
+        <>
+          Voting for Proposal {event.proposalId}: <Title event={event} /> closes
+          soon
         </>
       );
     case "proposal-concluded": {
@@ -171,14 +318,17 @@ function EventSentence({ event }: { event: DigestEvent }) {
       );
     case "vote": {
       const support = supportCopy(event.support);
+      const verb = event.support === 2 ? "abstained" : `voted ${support.label}`;
       return (
         <>
           {event.actor && <Person address={event.actor} />}{" "}
-          <span className={support.className}>
-            voted {support.label}
+          <span className={clsx("font-bold", support.className)}>
+            {verb}
             {event.voteWeight ? ` (${event.voteWeight})` : ""}
           </span>{" "}
-          Proposal {event.proposalId}: <Title event={event} />
+          <span className="font-bold text-content-secondary">
+            {event.proposalId}: <Title event={event} />
+          </span>
         </>
       );
     }
@@ -186,9 +336,14 @@ function EventSentence({ event }: { event: DigestEvent }) {
       const support = supportCopy(event.support);
       return (
         <>
-          {event.actor && <Person address={event.actor} />} commented{" "}
-          <span className={support.className}>{support.label}</span> on Proposal{" "}
-          {event.proposalId}: <Title event={event} />
+          {event.actor && <Person address={event.actor} />}{" "}
+          <span className="text-content-secondary">signaled</span>{" "}
+          <span className={clsx("font-bold", support.className)}>
+            {support.label}
+          </span>{" "}
+          <span className="font-bold text-content-secondary">
+            {event.proposalId}: <Title event={event} />
+          </span>
         </>
       );
     }
@@ -197,8 +352,8 @@ function EventSentence({ event }: { event: DigestEvent }) {
       return (
         <>
           {event.actor && <Person address={event.actor} />} commented{" "}
-          <span className={support.className}>{support.label}</span> on Candidate{" "}
-          <Title event={event} />
+          <span className={support.className}>{support.label}</span> on
+          Candidate <Title event={event} />
         </>
       );
     }
@@ -216,14 +371,22 @@ function EventSentence({ event }: { event: DigestEvent }) {
       return (
         <>
           {event.actor && <Person address={event.actor} />}{" "}
-          {event.counterpart ? "sold" : "bought"} <NounChip ids={event.nounIds} />
-          {event.counterpart && (
+          {event.counterpart ? "sold" : "bought"}{" "}
+          <NounChip ids={event.nounIds} />
+          <Recipients event={event} />
+          {event.amountWei ? ` for ${formatEth(event.amountWei)}` : ""}
+        </>
+      );
+    case "mint":
+      return (
+        <>
+          <NounChip ids={event.nounIds} /> minted
+          {event.actor && (
             <>
               {" "}
-              to <PersonWithAvatar address={event.counterpart} />
+              to <PersonWithAvatar address={event.actor} />
             </>
           )}
-          {event.amountWei ? ` for ${formatEth(event.amountWei)}` : ""}
         </>
       );
     case "transfer":
@@ -231,12 +394,7 @@ function EventSentence({ event }: { event: DigestEvent }) {
         <>
           {event.actor && <Person address={event.actor} />} transferred{" "}
           <NounChip ids={event.nounIds} />
-          {event.counterpart && (
-            <>
-              {" "}
-              to <PersonWithAvatar address={event.counterpart} />
-            </>
-          )}
+          <Recipients event={event} />
         </>
       );
     case "delegate":
@@ -244,12 +402,7 @@ function EventSentence({ event }: { event: DigestEvent }) {
         <>
           {event.actor && <Person address={event.actor} />} delegated{" "}
           <NounChip ids={event.nounIds} />
-          {event.counterpart && (
-            <>
-              {" "}
-              to <PersonWithAvatar address={event.counterpart} />
-            </>
-          )}
+          <Recipients event={event} />
         </>
       );
     default:
@@ -270,20 +423,50 @@ function Lead({ event }: { event: DigestEvent }) {
   );
 }
 
+const ONE_LINE_KINDS: DigestEventKind[] = ["vote", "proposal-feedback"];
+const BODY_KINDS: DigestEventKind[] = [
+  "vote",
+  "proposal-feedback",
+  "candidate-feedback",
+  "topic-feedback",
+];
+
 export default function DigestFeedItem({ event }: { event: DigestEvent }) {
+  const oneLine = ONE_LINE_KINDS.includes(event.kind);
+  const time = (
+    <span className="text-content-secondary">
+      {" "}
+      · {formatRelative(event.timestamp)}
+    </span>
+  );
   return (
-    <Link
-      to={event.href}
-      className="flex w-full items-start gap-2.5 py-2 text-[15px] leading-[22px] text-content-primary transition-opacity hover:opacity-70"
-    >
+    <div className="flex w-full items-start gap-2.5 py-2.5 text-[15px] leading-[22px] text-content-primary">
       <span className="flex h-[22px] w-[18px] shrink-0 items-center justify-center">
         <Lead event={event} />
       </span>
-      <p className="min-w-0 flex-1">
-        <EventSentence event={event} />
-        <span className="text-content-secondary"> · {formatRelative(event.timestamp)}</span>
-      </p>
-    </Link>
+      <div className="min-w-0 flex-1">
+        <Link
+          to={event.href}
+          className="flex min-w-0 items-baseline transition-opacity hover:opacity-70"
+        >
+          {oneLine ? (
+            <>
+              <p className="min-w-0 truncate">
+                <EventSentence event={event} />
+              </p>
+              <span className="shrink-0 whitespace-nowrap">{time}</span>
+            </>
+          ) : (
+            <p>
+              <EventSentence event={event} />
+              {time}
+            </p>
+          )}
+        </Link>
+        {BODY_KINDS.includes(event.kind) && <VoteBody event={event} />}
+        <VoteActions event={event} />
+      </div>
+    </div>
   );
 }
 
