@@ -7,6 +7,7 @@ import { EnsName } from "./EnsName";
 import TreasuryPill from "./TreasuryPill";
 import clsx from "clsx";
 import { useState } from "react";
+import { useHoverPopover } from "@/hooks/useHoverPopover";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Link, useNavigate } from "react-router-dom";
 import { LinkExternal } from "./ui/link";
@@ -51,7 +52,7 @@ const MENU_SECTIONS = {
 };
 
 export default function WalletDropdown({ disableMobileShrink }: WalletDropdownProps) {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, hoverProps } = useHoverPopover();
   const [delegationDialogOpen, setDelegationDialogOpen] = useState(false);
   const { disconnect } = useDisconnect();
   const { items: drafts } = useCollection();
@@ -98,6 +99,7 @@ export default function WalletDropdown({ disableMobileShrink }: WalletDropdownPr
                     <Button
                       variant="secondary"
                       className="flex flex-row gap-2 px-4 py-[6px]"
+                      {...hoverProps}
                     >
                       <EnsAvatar address={account.address as Address} size={32} />
                       <EnsName
@@ -110,6 +112,9 @@ export default function WalletDropdown({ disableMobileShrink }: WalletDropdownPr
                   <PopoverContent
                     align="end"
                     sideOffset={8}
+                    onOpenAutoFocus={(event) => event.preventDefault()}
+                    onCloseAutoFocus={(event) => event.preventDefault()}
+                    {...hoverProps}
                     className="w-[280px] bg-white p-0 text-gray-900 border-2 border-gray-200 shadow-lg"
                   >
                     {/* Header */}
