@@ -426,7 +426,7 @@ export function eventMatchesFilter(
   }
 }
 
-// Pre-indexed feed served from the VPS (workers/digest-indexer). Addresses
+// Pre-indexed feed served by services/digest-indexer. Addresses
 // come back lowercased, so checksum them to match the subgraph path.
 function digestApiUrl(): string | undefined {
   return import.meta.env.VITE_DIGEST_API_URL?.trim() || undefined;
