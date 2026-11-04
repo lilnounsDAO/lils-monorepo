@@ -26,6 +26,15 @@ jobs:
         working-directory: .
         run: bun install --frozen-lockfile
 
+      # Workspace packages resolve to their gitignored dist/, so build them first
+      # (same order as the Netlify build command).
+      - name: Build workspace packages
+        working-directory: .
+        run: |
+          (cd packages/types && bun run build)
+          (cd packages/assets && bun run build)
+          (cd packages/ui && bun run build || true)
+
       - name: Run wagmi codegen
         working-directory: apps/web
         run: bun run codegen
