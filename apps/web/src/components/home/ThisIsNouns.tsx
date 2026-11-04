@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import AnimateIn from "@/components/AnimateIn";
-import VideoDialog from "@/components/dialog/VideoDialog";
-import Image from "@/components/OptimizedImage";
+import ExplainerStories from "@/components/home/ExplainerStories";
 import { FloatingNounsBackground } from "@/components/FloatingNounsBackground";
 import { useQuery } from "@tanstack/react-query";
 import { getTotalMintedNouns } from "@/data/contracts/nounsToken";
@@ -10,12 +9,12 @@ import { Noun } from "@/data/noun/types";
 
 export default function ThisIsNouns() {
   return (
-    <section className="relative flex h-fit w-full max-w-[1600px] flex-col items-center justify-center md:h-[484px]">
+    <section className="relative flex h-fit w-full max-w-[1600px] flex-col items-center justify-center py-10 md:min-h-[484px] md:py-16">
       <Suspense fallback={null}>
         <BackgroundWrapper />
       </Suspense>
 
-      <div className="z-[1] flex flex-col items-center justify-center gap-4 px-6 text-center md:gap-8">
+      <div className="z-[1] flex w-full flex-col items-center justify-center gap-4 px-6 text-center md:gap-8">
         <div className="flex w-full max-w-[480px] flex-col gap-2">
           <AnimateIn delayS={0}>
             <h1 className="hero">Meet the Lils</h1>
@@ -27,25 +26,9 @@ export default function ThisIsNouns() {
           </AnimateIn>
         </div>
 
-        <VideoDialog videoUrl="https://www.youtube.com/watch?v=gPA_0fh_XwI">
-          <AnimateIn delayS={0.4}>
-            <div className="flex items-center justify-between gap-4 rounded-xl border py-2 pl-2 pr-6 transition-colors hover:bg-background-secondary hover:brightness-100">
-              <Image
-                src="/lilnouns-video-thumbnail.png"
-                width={113}
-                height={64}
-                alt="Lil Nouns Explainer"
-                className="rounded-lg"
-              />
-              <div className="flex flex-col items-center justify-center text-center">
-                <span className="label-lg">Lils Explained</span>
-                <span className="text-content-secondary paragraph-sm">
-                  Watch the video
-                </span>
-              </div>
-            </div>
-          </AnimateIn>
-        </VideoDialog>
+        <AnimateIn delayS={0.4} className="flex w-full justify-center">
+          <ExplainerStories />
+        </AnimateIn>
       </div>
     </section>
   );
