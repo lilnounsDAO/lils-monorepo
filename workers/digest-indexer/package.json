@@ -1,0 +1,13 @@
+{
+  "name": "@lils/digest-indexer",
+  "private": true,
+  "type": "module",
+  "description": "Indexes Lil Nouns DAO activity from the Goldsky subgraph into Postgres and serves a cached digest feed.",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "dev": "node --watch src/index.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}
