@@ -135,3 +135,6 @@ SECURITY-AUDIT-HARDCODED-SECRETS.md
 TODO-REPORT.md
 
 /apps/web/src/data/ponder/nouns/README.md 
+
+# TypeScript incremental build cache
+*.tsbuildinfo

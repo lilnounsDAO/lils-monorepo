@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import { Plus } from "lucide-react";
 import {
   InfiniteData,
   useInfiniteQuery,
@@ -25,6 +26,7 @@ import DigestFeedItem, {
   DigestFeedSkeleton,
 } from "@/components/Digest/DigestFeedItem";
 import DigestFeedFade from "@/components/Digest/DigestFeedFade";
+import CreateTypeDialog from "@/components/CreateTypeDialog";
 import DigestSidebar, { DigestTab } from "@/components/Digest/DigestSidebar";
 import { isDaoVersion5 } from "@/utils/daoVersion";
 
@@ -198,6 +200,7 @@ function DigestFeed({
 export default function DigestPage() {
   const [filter, setFilter] = useState<DigestFeedFilter>("all");
   const [tab, setTab] = useState<DigestTab>("digest");
+  const [createOpen, setCreateOpen] = useState(false);
   const showV5 = isDaoVersion5();
   const filters = FILTERS.filter(
     (item) =>
@@ -246,6 +249,14 @@ export default function DigestPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  className="flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+                >
+                  <Plus className="h-4 w-4" strokeWidth={2.25} />
+                  create
+                </button>
               </div>
             </div>
 
@@ -254,6 +265,12 @@ export default function DigestPage() {
 
           <DigestSidebar tab={tab} onTabChange={setTab} />
         </div>
+
+        <CreateTypeDialog
+          isOpen={createOpen}
+          onClose={() => setCreateOpen(false)}
+          daoType="lilnouns"
+        />
       </SearchProvider>
     </>
   );
