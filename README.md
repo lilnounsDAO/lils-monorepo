@@ -1,4 +1,4 @@
-# Nouns DAO Monorepo
+# Lil Nouns DAO Monorepo
 
 This monorepo powers the latest LilNouns[dot]wtf site, newly using Turborepo and Bun workspaces. It provides applications, shared packages, and unified tooling for streamlined development.
 
