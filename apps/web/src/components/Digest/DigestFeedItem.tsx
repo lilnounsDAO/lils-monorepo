@@ -400,9 +400,18 @@ function EventSentence({ event }: { event: DigestEvent }) {
     case "delegate":
       return (
         <>
-          {event.actor && <Person address={event.actor} />} delegated{" "}
-          <NounChip ids={event.nounIds} />
-          <Recipients event={event} />
+          {event.actor && <Person address={event.actor} />}{" "}
+          {event.undelegated ? (
+            <>
+              stopped delegating <NounChip ids={event.nounIds} />
+              <Recipients event={event} />
+            </>
+          ) : (
+            <>
+              delegated <NounChip ids={event.nounIds} />
+              <Recipients event={event} />
+            </>
+          )}
         </>
       );
     default:
