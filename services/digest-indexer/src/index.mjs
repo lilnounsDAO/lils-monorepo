@@ -299,14 +299,18 @@ function buildStreams({ roots, auctionFields, proposalFields: available }) {
       name: "delegations",
       root: "delegationEvents",
       tsField: "blockTimestamp",
-      select: "id blockTimestamp noun { id } previousDelegate { id } newDelegate { id }",
+      select: "id blockTimestamp noun { id owner { id } } previousDelegate { id } newDelegate { id }",
       map: (d) => {
         const from = lower(d.previousDelegate.id);
         const to = lower(d.newDelegate.id);
         if (isProtocol(from) || from === to) return [];
+        // The event has no delegator; the holder is the one who called delegate().
+        const owner = d.noun.owner?.id ? lower(d.noun.owner.id) : from;
+        const undelegated = to === owner;
+        const counterpart = undelegated ? from : to;
         return [{
-          id: `delegate-${d.id}`, kind: "delegate", timestamp: Number(d.blockTimestamp), href: `/profile/${to}`,
-          actor: from, counterpart: to, nounIds: [d.noun.id],
+          id: `delegate-${d.id}`, kind: "delegate", timestamp: Number(d.blockTimestamp), href: `/profile/${counterpart}`,
+          actor: owner, counterpart, nounIds: [d.noun.id], ...(undelegated && { undelegated }),
         }];
       },
     },
@@ -389,6 +393,8 @@ let version = 0;
 
 async function upsert(events) {
   if (!events.length) return 0;
+  // One statement can't touch the same id twice; keep the last copy of each.
+  events = [...new Map(events.map((e) => [e.id, e])).values()];
   let changed = 0;
   for (let i = 0; i < events.length; i += 500) {
     const chunk = events.slice(i, i + 500);
@@ -579,7 +585,7 @@ function clusterEvents(events) {
   const out = [];
   const open = new Map(); // `${kind}:${actor}` -> cluster
   for (const e of events) {
-    const key = `${e.kind}:${e.actor ?? ""}`;
+    const key = `${e.kind}:${e.undelegated ? "un" : ""}:${e.actor ?? ""}`;
     const cluster = CLUSTER_KINDS.has(e.kind) ? open.get(key) : undefined;
     if (cluster && cluster.oldest - e.timestamp <= CLUSTER_WINDOW) {
       cluster.event.nounIds = [...new Set([...(cluster.event.nounIds ?? []), ...(e.nounIds ?? [])])];

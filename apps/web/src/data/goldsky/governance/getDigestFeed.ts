@@ -63,6 +63,8 @@ export interface DigestEvent {
   reason?: string;
   conclusion?: DigestConclusion;
   endsAt?: number;
+  /** Delegate rows: the holder took their votes back from `counterpart`. */
+  undelegated?: boolean;
   /** Set when a clustered row went to more than one account. */
   counterparts?: Address[];
   replies?: DigestQuote[];
@@ -120,7 +122,7 @@ const coreQuery = `
     }
     delegationEvents(first: $first, orderBy: blockTimestamp, orderDirection: desc) {
       id
-      noun { id }
+      noun { id owner { id } }
       previousDelegate { id }
       newDelegate { id }
       blockTimestamp
@@ -217,7 +219,7 @@ interface CoreResponse {
   }>;
   delegationEvents?: Array<{
     id: string;
-    noun: { id: string };
+    noun: { id: string; owner?: AccountRef };
     previousDelegate: AccountRef;
     newDelegate: AccountRef;
     blockTimestamp: string;
@@ -360,7 +362,7 @@ function groupConsecutive(events: DigestEvent[]): DigestEvent[] {
   for (const event of events) {
     const clusterable =
       event.kind === "transfer" || event.kind === "delegate" || event.kind === "mint";
-    const key = `${event.kind}:${event.actor?.toLowerCase() ?? ""}`;
+    const key = `${event.kind}:${event.undelegated ? "un" : ""}:${event.actor?.toLowerCase() ?? ""}`;
     const cluster = clusterable ? open.get(key) : undefined;
 
     if (cluster && cluster.oldest - event.timestamp <= CLUSTER_WINDOW_SECONDS) {
@@ -555,9 +557,13 @@ export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> 
     if (transferKeys.has(`${nounId}-${timestamp}`)) continue;
     if (isProtocol(delegation.previousDelegate.id)) continue;
     if (sameAddr(delegation.previousDelegate.id, delegation.newDelegate.id)) continue;
-    const actor = toAddress(delegation.previousDelegate.id);
-    const counterpart = toAddress(delegation.newDelegate.id);
-    if (!actor || !counterpart) continue;
+    // The event has no delegator; the holder is the one who called delegate().
+    const from = toAddress(delegation.previousDelegate.id);
+    const to = toAddress(delegation.newDelegate.id);
+    const actor = toAddress(delegation.noun.owner?.id ?? delegation.previousDelegate.id);
+    if (!actor || !from || !to) continue;
+    const undelegated = sameAddr(to, actor);
+    const counterpart = undelegated ? from : to;
     events.push({
       id: `delegate-${delegation.id}`,
       kind: "delegate",
@@ -566,6 +572,7 @@ export async function getDigestFeed(limit: number = 80): Promise<DigestEvent[]> 
       actor,
       counterpart,
       nounIds: [nounId],
+      ...(undelegated && { undelegated }),
     });
   }
 
