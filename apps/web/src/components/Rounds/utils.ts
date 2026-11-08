@@ -87,3 +87,28 @@ export function toRoundActor(
   if (key && isAddress(key)) return { address: key, name: name ?? null, image: image ?? null };
   return { name: name ?? (key ? key.split(":").slice(1).join(":") : null), image: image ?? null };
 }
+
+/**
+ * Gold, silver and bronze for the top three places, so a winning proposal reads
+ * as one at a glance. Fourth and beyond get the plain treatment: a round can
+ * have twenty awards, and twenty highlighted cards highlight nothing.
+ */
+export const PODIUM = {
+  1: {
+    card: "border-[#D9A441] bg-[#D9A441]/[0.06]",
+    badge: "bg-[#D9A441] text-[#2B1D00]",
+  },
+  2: {
+    card: "border-[#9BA3AC] bg-[#9BA3AC]/[0.06]",
+    badge: "bg-[#9BA3AC] text-[#15181C]",
+  },
+  3: {
+    card: "border-[#B4703A] bg-[#B4703A]/[0.06]",
+    badge: "bg-[#B4703A] text-[#2B1403]",
+  },
+} as const;
+
+export function podiumStyle(place: number | null | undefined) {
+  return place === 1 || place === 2 || place === 3 ? PODIUM[place] : null;
+}
+

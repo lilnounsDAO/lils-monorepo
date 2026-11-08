@@ -6,8 +6,10 @@ import { SomethingWentWrong } from "@/components/SomethingWentWrong";
 import RoundProposalForm from "@/components/Rounds/RoundProposalForm";
 import { isArchivedRound } from "@/components/Rounds/utils";
 import { useRound } from "@/hooks/rounds/useRounds";
+import { useScrollToTop } from "@/hooks/rounds/useScrollToTop";
 
 export default function RoundProposePage() {
+  useScrollToTop();
   const { handle } = useParams<{ handle: string }>();
   const [params] = useSearchParams();
   const navigate = useNavigate();

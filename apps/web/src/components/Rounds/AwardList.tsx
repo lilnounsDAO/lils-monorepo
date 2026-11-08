@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import clsx from "clsx";
 import { Round, RoundProposal } from "@/data/rounds/types";
 import RoundIdentity from "./RoundIdentity";
-import { formatAward, ordinal, toRoundActor } from "./utils";
+import { formatAward, ordinal, podiumStyle, toRoundActor } from "./utils";
 
 /**
  * The prizes, and once the round has settled, who won each one. A place with no
@@ -46,7 +46,12 @@ export default function AwardList({
                 )
               )}
             </span>
-            <span className="shrink-0 text-sm font-medium text-content-secondary">
+            <span
+              className={clsx(
+                "shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium",
+                podiumStyle(award.place)?.badge ?? "text-content-secondary",
+              )}
+            >
               {ordinal(award.place)}
             </span>
           </li>

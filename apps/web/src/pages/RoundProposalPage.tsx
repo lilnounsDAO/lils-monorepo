@@ -9,8 +9,10 @@ import RoundIdentity from "@/components/Rounds/RoundIdentity";
 import { ordinal, toRoundActor } from "@/components/Rounds/utils";
 import { formatNumber, formatTimestamp } from "@/utils/format";
 import { useRound, useRoundProposal } from "@/hooks/rounds/useRounds";
+import { useScrollToTop } from "@/hooks/rounds/useScrollToTop";
 
 export default function RoundProposalPage() {
+  useScrollToTop();
   const { handle, id } = useParams<{ handle: string; id: string }>();
   const { address } = useAccount();
   const proposalId = Number(id);

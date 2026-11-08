@@ -134,3 +134,16 @@ CREATE TABLE IF NOT EXISTS rounds.voting_power (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (round_id, voter)
 );
+
+-- Imported images. The gateways both platforms served them from are gone and
+-- the public ones rate limit or refuse to be embedded cross-origin, so the
+-- first request for a CID fetches it once and this table keeps the bytes: the
+-- archive stops depending on anyone else's gateway staying up.
+CREATE TABLE IF NOT EXISTS rounds.image (
+  cid        TEXT PRIMARY KEY,
+  mime       TEXT NOT NULL,
+  bytes      BYTEA NOT NULL,
+  size       INTEGER NOT NULL,
+  source     TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

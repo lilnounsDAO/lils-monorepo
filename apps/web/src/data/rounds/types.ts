@@ -147,3 +147,22 @@ export interface BallotAllocation {
   proposal: number;
   votes: string;
 }
+
+export interface RoundVote {
+  id: number;
+  timestamp: string;
+  voter: string;
+  voterName: string | null;
+  voterImage: string | null;
+  weight: string;
+}
+
+export interface ProposalVotes {
+  proposal: {
+    id: number;
+    title: string;
+    voteCount: string;
+    roundHandle: string;
+  };
+  votes: RoundVote[];
+}

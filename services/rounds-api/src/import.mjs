@@ -25,8 +25,10 @@
  * URL they came from, and are settled on arrival with an `archive` strategy, so
  * nobody can propose or vote on them here.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { extname, join } from "node:path";
 import pg from "pg";
+import { rawCid } from "./cid.mjs";
 
 const env = process.env;
 const DATABASE_URL = env.DATABASE_URL;
@@ -34,6 +36,124 @@ const HOUSE_HANDLE = env.HOUSE_HANDLE || "lilnouns";
 const DRY_RUN = process.argv.includes("--dry-run");
 const SOURCES = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
 const WANTED = (name) => SOURCES.length === 0 || SOURCES.includes(name);
+
+// The gateways both platforms served their images from are gone with them
+// (ipfs.nouns.gg no longer resolves), so every IPFS URL is rewritten to one
+// place we control. The CIDs are unchanged, so the images themselves survive.
+//
+// Set IPFS_API to a kubo node to pin them there as well, which keeps a copy on
+// the network under our own node rather than only in this service's cache.
+const IPFS_API = (env.IPFS_API || "").replace(/\/$/, "");
+// By default images are served by this service's own /images/:cid route, which
+// fetches a CID once and then keeps it. PUBLIC_URL is where that service
+// answers from a browser — in production, behind nginx at /api/funding.
+const PUBLIC_URL = (env.PUBLIC_URL || `http://localhost:${env.PORT || 3040}`).replace(/\/$/, "");
+// Set IPFS_GATEWAY to serve the images straight from a gateway instead. Few
+// public ones work for this: they rate limit, and several send a
+// Cross-Origin-Resource-Policy that stops a browser embedding the image at all.
+const IPFS_GATEWAY = env.IPFS_GATEWAY?.replace(/\/$/, "") || "";
+
+const imageUrl = (cid) =>
+  IPFS_GATEWAY ? `${IPFS_GATEWAY}/ipfs/${cid}` : `${PUBLIC_URL}/images/${cid}`;
+const PIN_TIMEOUT_MS = Number(env.PIN_TIMEOUT_MS || 60_000);
+const PIN_CONCURRENCY = Number(env.PIN_CONCURRENCY || 8);
+const WARM_CONCURRENCY = Number(env.WARM_CONCURRENCY || 2);
+const GATEWAY_URL = /https?:\/\/[^/\s)"'\]]+\/ipfs\/([A-Za-z0-9]+)/g;
+
+/** Every CID the import rewrote, for the pinning pass at the end. */
+const seenCids = new Set();
+
+/** Points IPFS URLs at where we serve them, leaving everything else alone. */
+function rehost(value) {
+  if (typeof value === "string") {
+    return value.replace(GATEWAY_URL, (_match, cid) => {
+      seenCids.add(cid);
+      return imageUrl(cid);
+    });
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rehost(item)]));
+  }
+  return value;
+}
+
+/**
+ * Asks the service for each image we rewrote, which is what fills its cache, so
+ * the first person to open a round is not the one waiting on a gateway. The
+ * service does the fetching, so this needs it to be running; if it is not, the
+ * images just stay cold and fill in as people browse.
+ */
+async function warmImages() {
+  if (IPFS_GATEWAY || seenCids.size === 0 || DRY_RUN) return;
+  const reachable = await fetch(`${PUBLIC_URL}/health`, { signal: AbortSignal.timeout(5_000) })
+    .then((response) => response.ok)
+    .catch(() => false);
+  if (!reachable) {
+    console.warn(`no service at ${PUBLIC_URL}; images will be fetched as they are first viewed`);
+    return;
+  }
+
+  console.log(`caching ${seenCids.size} images through ${PUBLIC_URL}…`);
+  const queue = [...seenCids];
+  let cached = 0;
+  // Gently: the public gateways rate limit hard, and asking for many at once
+  // gets every one of them refused.
+  await Promise.all(
+    Array.from({ length: Math.min(WARM_CONCURRENCY, queue.length) }, async () => {
+      for (let cid = queue.pop(); cid !== undefined; cid = queue.pop()) {
+        const response = await fetch(`${PUBLIC_URL}/images/${cid}`, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(PIN_TIMEOUT_MS),
+        }).catch(() => null);
+        if (response?.ok) cached += 1;
+      }
+    }),
+  );
+  // A miss here is usually a gateway refusing us rather than an image that is
+  // gone, so say so: the service tries again the next time one is viewed, and
+  // re-running the import picks up the rest.
+  const missed = seenCids.size - cached;
+  console.log(
+    `cached ${cached} images` +
+      (missed > 0 ? `; ${missed} could not be fetched this time and stay cold` : ""),
+  );
+}
+
+/**
+ * Pins what we rewrote to our own node. Kubo fetches the block before it pins,
+ * so a CID nobody still hosts times out rather than hanging the import.
+ */
+async function pinImages() {
+  if (!IPFS_API || seenCids.size === 0 || DRY_RUN) return;
+  console.log(`pinning ${seenCids.size} images to ${IPFS_API}…`);
+  const queue = [...seenCids];
+  let pinned = 0;
+  // A handful at a time: each pin waits on the network, and one slow CID should
+  // not hold up the rest.
+  await Promise.all(
+    Array.from({ length: Math.min(PIN_CONCURRENCY, queue.length) }, async () => {
+      for (let cid = queue.pop(); cid !== undefined; cid = queue.pop()) {
+        const response = await fetch(
+          `${IPFS_API}/api/v0/pin/add?arg=${encodeURIComponent(cid)}&recursive=true`,
+          { method: "POST", signal: AbortSignal.timeout(PIN_TIMEOUT_MS) },
+        ).catch(() => null);
+        if (response?.ok) pinned += 1;
+      }
+    }),
+  );
+  const lost = seenCids.size - pinned;
+  console.log(`pinned ${pinned} images${lost > 0 ? `; ${lost} are no longer on the network` : ""}`);
+}
+
+// Avatars hosted somewhere that is gone for good (cloudnouns' generator answers
+// 522 now) are dropped rather than stored, so the ENS avatar and the placeholder
+// in the UI take over instead of a broken image.
+const DEAD_IMAGE_HOST = /^https?:\/\/(?:api\.cloudnouns\.com)\b/;
+
+function avatar(value) {
+  const url = rehost(value);
+  return typeof url === "string" && DEAD_IMAGE_HOST.test(url) ? null : url;
+}
 
 const NGG_REPO = env.NGG_REPO || "nouns-esports/nouns-gg";
 const NGG_REF = env.NGG_REF || "master";
@@ -249,6 +369,68 @@ function slugify(text, fallback) {
 }
 
 // ---------------------------------------------------------------------------
+// Artwork
+//
+// Some rounds reach us with no usable picture: Prop House never stored one, and
+// a nouns.gg round only has artwork when it was run for an event. The files in
+// `assets/` fill those gaps. They go through the same door as every other
+// image — stored under their own CID and served from /images/<cid> — so a round
+// still points at content, not at a file in the web app, and `IPFS_API` pins
+// them onto our node alongside the rest.
+//
+//   assets/rounds/<handle>.<ext>   that round's picture, whatever it arrived with
+//   assets/sources/<source>.<ext>  stands in for any round of that source with none
+
+const MIME = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
+const artwork = { rounds: new Map(), sources: new Map() };
+
+async function loadArtwork() {
+  const root = new URL("../assets/", import.meta.url).pathname;
+  for (const [folder, into] of [["rounds", artwork.rounds], ["sources", artwork.sources]]) {
+    let files;
+    try {
+      files = readdirSync(join(root, folder));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const mime = MIME[extname(file).toLowerCase()];
+      if (!mime) continue;
+      const bytes = readFileSync(join(root, folder, file));
+      const cid = rawCid(bytes);
+      into.set(file.slice(0, -extname(file).length), imageUrl(cid));
+      seenCids.add(cid);
+      if (DRY_RUN) continue;
+      await db.query(
+        `INSERT INTO rounds.image (cid, mime, bytes, size, source) VALUES ($1, $2, $3, $4, 'assets')
+         ON CONFLICT (cid) DO NOTHING`,
+        [cid, mime, bytes, bytes.length],
+      );
+    }
+  }
+  const total = artwork.rounds.size + artwork.sources.size;
+  if (total > 0) console.log(`${total} images from assets/`);
+}
+
+/** The round's own picture, what we supplied for it, or its platform's mark. */
+function pictureFor(round) {
+  return (
+    artwork.rounds.get(round.handle) ??
+    rehost(round.image) ??
+    artwork.sources.get(round.source) ??
+    null
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Writing
 
 const stats = {
@@ -305,11 +487,11 @@ async function writeRound({ round, awards, proposals, votes }) {
         HOUSE_HANDLE,
         round.name,
         round.description,
-        round.content,
-        round.image,
+        rehost(round.content),
+        pictureFor(round),
         round.creator,
         round.creatorName,
-        round.creatorImage,
+        avatar(round.creatorImage) ?? artwork.sources.get(round.source) ?? null,
         round.startAt,
         round.votingStartAt,
         round.endAt,
@@ -336,10 +518,10 @@ async function writeRound({ round, awards, proposals, votes }) {
           saved.id,
           proposal.author,
           proposal.authorName,
-          proposal.authorImage,
+          avatar(proposal.authorImage),
           proposal.title,
           proposal.tldr,
-          proposal.content,
+          rehost(proposal.content),
           round.source,
           proposal.sourceId,
           proposal.createdAt,
@@ -352,24 +534,28 @@ async function writeRound({ round, awards, proposals, votes }) {
     for (const vote of votes) {
       const proposalId = proposalIds.get(vote.proposalSourceId);
       if (!proposalId || !(BigInt(vote.weight) > 0n)) continue;
-      const { rowCount } = await connection.query(
+      // A cast vote is final, so only the voter's display fields are refreshed;
+      // xmax tells a fresh insert from an update, so the count stays honest.
+      const { rows: [written] } = await connection.query(
         `INSERT INTO rounds.vote
            (round_id, proposal_id, voter, voter_name, voter_image, weight, source, source_id, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (source, source_id) DO NOTHING`,
+         ON CONFLICT (source, source_id) DO UPDATE
+           SET voter_name = EXCLUDED.voter_name, voter_image = EXCLUDED.voter_image
+         RETURNING (xmax = 0) AS inserted`,
         [
           saved.id,
           proposalId,
           vote.voter,
           vote.voterName,
-          vote.voterImage,
+          avatar(vote.voterImage),
           String(vote.weight),
           round.source,
           vote.sourceId,
           vote.createdAt,
         ],
       );
-      if (rowCount > 0) stats.votes += 1;
+      if (written?.inserted) stats.votes += 1;
     }
 
     // Rebuild the cached totals from the votes that are actually stored.
@@ -391,7 +577,7 @@ async function writeRound({ round, awards, proposals, votes }) {
          ON CONFLICT (round_id, place) DO UPDATE
            SET asset = EXCLUDED.asset, value = EXCLUDED.value,
                winner_proposal_id = coalesce(EXCLUDED.winner_proposal_id, rounds.award.winner_proposal_id)`,
-        [saved.id, award.place, award.asset, String(award.value), winner],
+        [saved.id, award.place, rehost(award.asset), String(award.value), winner],
       );
       stats.awards += 1;
     }
@@ -469,11 +655,24 @@ async function importNounsGg() {
   console.log("reading the nouns.gg export…");
   const paths = [...new Set([...(await nggRoundPaths()), ...NGG_EXTRA_ROUNDS])];
 
-  const [allProposals, allAwards, profileIndex] = await Promise.all([
+  const [allProposals, allAwards, profileIndex, eventIndex] = await Promise.all([
     getJson(`${NGG_DATA}/activity/proposals.json`),
     getJson(`${NGG_DATA}/activity/awards.json`),
     getJson(`${NGG_DATA}/profiles/index.json`, { optional: true }),
+    getJson(`${NGG_DATA}/events/index.json`, { optional: true }),
   ]);
+
+  // A round run for an event shows that event's artwork. Rounds carry the event
+  // id under the community that ran them, which is not always the one that owns
+  // the event, so the handle is the reliable half.
+  const events = new Map();
+  for (const event of eventIndex ?? []) {
+    if (!event.image) continue;
+    events.set(event.id, event.image);
+    if (event.handle && !events.has(event.handle)) events.set(event.handle, event.image);
+  }
+  const bannerFor = (eventId) =>
+    eventId ? events.get(eventId) ?? events.get(eventId.split(":").pop()) ?? null : null;
 
   // Most profiles have no wallet, so imported rows keep a display name and an
   // `nouns.gg:<id>` key instead of inventing an address.
@@ -574,7 +773,10 @@ async function importNounsGg() {
         name: round.name ?? "Untitled round",
         description: round.description || firstSentence(content),
         content,
-        image: round.image ?? null,
+        // A round run for an event shows that event's artwork; the rest carry
+        // the community's avatar, which is the same picture on every round, so
+        // they are left blank for the UI to fill.
+        image: bannerFor(round.eventId),
         creator: `nouns.gg:${community}`,
         creatorName: round.community?.name ?? "nouns.gg",
         creatorImage: round.community?.image ?? null,
@@ -732,8 +934,11 @@ if (!DRY_RUN) {
   );
 }
 
+await loadArtwork();
 if (WANTED("nouns-gg")) await importNounsGg();
 if (WANTED("prop-house")) await importPropHouse();
+await warmImages();
+await pinImages();
 
 console.log(
   `${DRY_RUN ? "would import" : "imported"}: ${stats.rounds} rounds, ${stats.proposals} proposals, ` +

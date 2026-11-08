@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 import { parseUnits, zeroAddress } from "viem";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { CHAIN_CONFIG } from "@/config";
 import { RoundAsset, RoundAwardInput, Round } from "@/data/rounds/types";
 import { useCreateRound } from "@/hooks/rounds/useRoundWrites";
+import { uploadImage } from "@/utils/localImages";
 import ConnectPrompt from "./ConnectPrompt";
 import { ordinal } from "./utils";
 
@@ -71,6 +72,7 @@ function handleFromName(name: string): string {
  */
 export default function RoundForm({ onDone }: { onDone: (handle: string) => void }) {
   const { address } = useAccount();
+  const { signMessageAsync } = useSignMessage();
   const create = useCreateRound();
 
   const now = new Date();
@@ -79,6 +81,8 @@ export default function RoundForm({ onDone }: { onDone: (handle: string) => void
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
   const [image, setImage] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [startAt, setStartAt] = useState(toLocalInput(new Date(now.getTime() + 60 * 60_000)));
   const [votingStartAt, setVotingStartAt] = useState(
@@ -212,13 +216,50 @@ export default function RoundForm({ onDone }: { onDone: (handle: string) => void
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="round-image">Image URL</Label>
-        <Input
-          id="round-image"
-          value={image}
-          placeholder="https://"
-          onChange={(event) => setImage(event.target.value)}
-        />
+        <Label htmlFor="round-image">Image</Label>
+        <div className="flex items-center gap-3">
+          {image && (
+            <img src={image} alt="" className="size-16 shrink-0 rounded-[12px] object-cover" />
+          )}
+          <Input
+            id="round-image"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            disabled={uploading || !address}
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file || !address) return;
+              setImageError(null);
+              setUploading(true);
+              try {
+                setImage(
+                  await uploadImage(file, {
+                    address,
+                    chainId: CHAIN_CONFIG.chain.id,
+                    signMessage: (message) => signMessageAsync({ message }),
+                  }),
+                );
+              } catch (error) {
+                setImageError(error instanceof Error ? error.message : "The image did not upload.");
+              } finally {
+                setUploading(false);
+              }
+            }}
+          />
+          {image && (
+            <button type="button" className="text-sm underline" onClick={() => setImage("")}>
+              Remove
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-content-secondary">
+          {uploading
+            ? "Signing and uploading…"
+            : imageError
+              ? imageError
+              : "Pinned to IPFS, the same way proposal images are."}
+        </p>
       </div>
 
       <fieldset className="flex flex-col gap-3">

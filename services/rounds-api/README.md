@@ -128,10 +128,66 @@ saying how many proposals existed and why they are not here. Nothing more is
 recoverable; if a database dump ever turns up, point `PH_COMMUNITY_URL` and
 `PH_PROPOSAL_SNAPSHOTS` at it and re-run.
 
+**Images.** Both platforms served their images from their own IPFS gateways,
+which went down with them. The CIDs are still on the network, but no public
+gateway is dependable enough to point the pages at: `ipfs.io` and `dweb.link`
+rate limit, and Pinata's sends a `Cross-Origin-Resource-Policy` that stops a
+browser embedding the image at all.
+
+So we serve them. The importer rewrites every IPFS URL to `PUBLIC_URL/images/<cid>`,
+and `GET /images/:cid` fetches that CID once from `IMAGE_GATEWAYS`, keeps the
+bytes in `rounds.image`, and serves them from then on with
+`Cache-Control: immutable` — content-addressed, so it never goes stale. A CID
+nobody still hosts returns 404 and the page falls back to its placeholder.
+
+After writing the rounds the importer asks the service for each image, which is
+what fills the cache, so the first visitor is not the one waiting on a gateway.
+It goes two at a time because the public gateways refuse a burst; whatever they
+refuse stays cold, is fetched the next time someone opens that round, and is
+picked up by the next import.
+
+Two settings change this. `IPFS_GATEWAY` makes the importer write gateway URLs
+directly instead, skipping the cache. `IPFS_API` additionally pins every CID to
+a kubo node, which keeps our own copy on the network rather than only in this
+service:
+
+```bash
+IPFS_API=http://127.0.0.1:5001 node src/import.mjs
+```
+
+Pinning fetches each image first, so it takes a few minutes and reports any CID
+nobody still hosts. Avatars on hosts that are gone outright (cloudnouns'
+generator answers 522) are dropped at import instead, so the ENS avatar and
+placeholder take over. The web app renders all of these through `RoundImage`,
+which removes an image whose load fails rather than leaving a broken-image icon
+on the page.
+
+**Artwork we supply.** Some rounds reach us with no usable picture: Prop House
+never stored one, and a nouns.gg round only has artwork when it was run for an
+event. `assets/` fills those gaps and goes through the same door as everything
+else — each file is stored under its own CID and served from `/images/<cid>`,
+so a round points at content rather than at a file in the web app, and
+`IPFS_API` pins them onto our node with the rest.
+
+```
+assets/rounds/<handle>.<ext>    that round's picture, whatever it arrived with
+assets/sources/<source>.<ext>   stands in for any round of that source with none
+```
+
+CIDs are computed the way `ipfs add --cid-version=1 --raw-leaves` computes them,
+so a file here and the same file on a kubo node are the same CID. That only
+holds below kubo's 256 KiB chunk size; a larger file is refused rather than
+given an address the network would not resolve.
+
+A round opened here uploads its image through
+[ipfs-upload](../ipfs-upload) from the browser, wallet-signed, exactly as the
+proposal editor uploads images — so every round image, imported or not, is
+content-addressed.
+
 ## Deploy (VPS, pm2)
 
 ```bash
-scp -r package.json schema.sql ecosystem.config.cjs src ponder@<vps>:rounds-api/
+scp -r package.json schema.sql ecosystem.config.cjs src assets ponder@<vps>:rounds-api/
 ssh ponder@<vps> 'cd rounds-api && npm i --omit=dev && pm2 start ecosystem.config.cjs && pm2 save'
 ssh ponder@<vps> 'cd rounds-api && node --env-file=.env src/import.mjs'
 ```

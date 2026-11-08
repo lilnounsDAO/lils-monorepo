@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import LoadingSkeletons from "@/components/LoadingSkeletons";
 import SearchProvider, { SearchInput, useSearchContext } from "@/components/Search";
 import RoundCard from "@/components/Rounds/RoundCard";
@@ -12,9 +12,9 @@ import { useRoundHouse, useRoundsList } from "@/hooks/rounds/useRounds";
 import { formatNumber } from "@/utils/format";
 
 const FILTERS = [
+  { id: "all", label: "All" },
   { id: "open", label: "Open" },
   { id: "ended", label: "Ended" },
-  { id: "all", label: "All" },
 ] as const;
 
 type Filter = (typeof FILTERS)[number]["id"];
@@ -59,7 +59,7 @@ function RoundsFeed({ filter }: { filter: Filter }) {
 }
 
 export default function RoundsPage() {
-  const [filter, setFilter] = useState<Filter>("open");
+  const [filter, setFilter] = useState<Filter>("all");
   const { data: house } = useRoundHouse();
   const totals = house?.totals;
 
@@ -128,11 +128,21 @@ export default function RoundsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <SearchInput className="w-full md:w-56" placeholder="Search rounds" />
-                  <Link to="/rounds/new">
-                    <Button>
-                      <Plus className="mr-1 size-4" /> New round
-                    </Button>
-                  </Link>
+                  {/* Opening a round is off for now; the page and the write
+                      path still work at /rounds/new. A disabled button fires no
+                      pointer events, so the trigger wraps it. */}
+                  <Tooltip delayDuration={200}>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0}>
+                        <Button disabled>
+                          <Plus className="mr-1 size-4" /> New round
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Creating rounds isn't live yet
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 

@@ -8,6 +8,7 @@ import {
   getRoundHouse,
   getRoundPower,
   getRoundProposal,
+  getRoundProposalVotes,
   getRounds,
   hasRoundsApi,
 } from "@/data/rounds/client";
@@ -73,5 +74,15 @@ export function useRoundHouse() {
     queryFn: getRoundHouse,
     enabled: hasRoundsApi(),
     staleTime: 5 * 60_000,
+  });
+}
+
+/** Only fetched once the votes dialog is actually opened. */
+export function useRoundProposalVotes(id: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["round-proposal-votes", id],
+    queryFn: () => getRoundProposalVotes(id!),
+    enabled: hasRoundsApi() && Boolean(id) && enabled,
+    staleTime: 30_000,
   });
 }

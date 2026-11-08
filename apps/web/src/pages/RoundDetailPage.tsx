@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Link, useParams } from "react-router-dom";
 import { useAccount } from "wagmi";
 import clsx from "clsx";
-import { ArrowLeft, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
@@ -14,6 +14,7 @@ import ConnectPrompt from "@/components/Rounds/ConnectPrompt";
 import RoundActivityFeed from "@/components/Rounds/RoundActivityFeed";
 import RoundIdentity from "@/components/Rounds/RoundIdentity";
 import RoundProposalCard from "@/components/Rounds/RoundProposalCard";
+import RoundImage from "@/components/Rounds/RoundImage";
 import RoundStateBadge from "@/components/Rounds/RoundStateBadge";
 import RoundTimeline from "@/components/Rounds/RoundTimeline";
 import VoteControls from "@/components/Rounds/VoteControls";
@@ -24,10 +25,12 @@ import {
 } from "@/components/Rounds/utils";
 import { useCastRoundVotes } from "@/hooks/rounds/useRoundWrites";
 import { useRound, useRoundActivity, useRoundPower } from "@/hooks/rounds/useRounds";
+import { useScrollToTop } from "@/hooks/rounds/useScrollToTop";
 
 type Tab = "proposals" | "activity" | "about";
 
 export default function RoundDetailPage() {
+  useScrollToTop();
   const { handle } = useParams<{ handle: string }>();
   const { address } = useAccount();
   const [tab, setTab] = useState<Tab>("proposals");
@@ -89,33 +92,21 @@ export default function RoundDetailPage() {
             <RoundStateBadge round={round} />
           </div>
           <div className="flex items-start gap-4">
-            {round.image && (
-              <img
-                src={round.image}
-                alt=""
-                className="hidden size-20 shrink-0 rounded-[12px] object-cover md:block"
-              />
-            )}
+            <RoundImage
+              src={round.image}
+              className="hidden size-20 shrink-0 rounded-[12px] object-cover md:block"
+            />
             <div className="flex min-w-0 flex-col gap-2">
               <h1 className="text-3xl font-bold">{round.name}</h1>
-              <p className="flex flex-wrap items-center gap-2 text-sm text-content-secondary">
+              {/* A div, not a p: the avatar inside RoundIdentity renders a div. */}
+              <div className="flex flex-wrap items-center gap-2 text-sm text-content-secondary">
                 <span>Opened by</span>
                 <RoundIdentity
                   actor={toRoundActor(round.creator, round.creatorName, round.creatorImage)}
                   avatarSize={18}
                   className="text-sm"
                 />
-                {round.sourceUrl && (
-                  <a
-                    href={round.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1 underline"
-                  >
-                    Original round <ExternalLink className="size-3" />
-                  </a>
-                )}
-              </p>
+              </div>
             </div>
           </div>
           {round.description && <p className="text-content-secondary">{round.description}</p>}
@@ -168,7 +159,11 @@ export default function RoundDetailPage() {
 
                 {proposals.length === 0 ? (
                   <p className="py-8 text-center text-content-secondary">
-                    No proposals yet.
+                    {archived
+                      ? "This round's proposals were not preserved. See About for what survived."
+                      : round.state === "ended"
+                        ? "This round ended without any proposals."
+                        : "No proposals yet."}
                   </p>
                 ) : (
                   proposals.map((proposal) => (
@@ -247,8 +242,11 @@ export default function RoundDetailPage() {
 
             <section className="flex flex-col gap-2 rounded-[16px] border p-5 text-sm">
               <h2 className="font-bold">Rules</h2>
+              {/* An archived round describes both sides the same way; say it once. */}
               <p className="text-content-secondary">{round.proposeStrategyDescription}</p>
-              <p className="text-content-secondary">{round.voteStrategyDescription}</p>
+              {round.voteStrategyDescription !== round.proposeStrategyDescription && (
+                <p className="text-content-secondary">{round.voteStrategyDescription}</p>
+              )}
               {round.snapshotBlock && (
                 <p className="text-content-secondary">
                   Voting power read at block {round.snapshotBlock.toLocaleString()}

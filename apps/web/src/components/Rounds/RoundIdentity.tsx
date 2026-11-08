@@ -3,6 +3,7 @@ import { getAddress } from "viem";
 import { cn } from "@/utils/shadcn";
 import { EnsAvatar } from "../EnsAvatar";
 import { EnsName } from "../EnsName";
+import RoundImage from "./RoundImage";
 import { RoundActor } from "./utils";
 
 /**
@@ -41,22 +42,19 @@ export default function RoundIdentity({
 
   return (
     <span className={cn("flex items-center gap-1 font-bold", className)} title={actor.address}>
-      {actor.image ? (
-        <img
-          src={actor.image}
-          alt=""
-          width={avatarSize}
-          height={avatarSize}
-          loading="lazy"
-          className="rounded-full object-cover"
-          style={{ width: avatarSize, height: avatarSize }}
-        />
-      ) : (
-        <span
-          className="rounded-full bg-background-secondary"
-          style={{ width: avatarSize, height: avatarSize }}
-        />
-      )}
+      <RoundImage
+        src={actor.image}
+        width={avatarSize}
+        height={avatarSize}
+        className="rounded-full object-cover"
+        style={{ width: avatarSize, height: avatarSize }}
+        fallback={
+          <span
+            className="rounded-full bg-background-secondary"
+            style={{ width: avatarSize, height: avatarSize }}
+          />
+        }
+      />
       <span className="truncate">{actor.name ?? "Anonymous"}</span>
     </span>
   );

@@ -3,8 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import RoundForm from "@/components/Rounds/RoundForm";
 import { hasRoundsApi } from "@/data/rounds/client";
+import { useScrollToTop } from "@/hooks/rounds/useScrollToTop";
 
 export default function RoundCreatePage() {
+  useScrollToTop();
   const navigate = useNavigate();
 
   return (

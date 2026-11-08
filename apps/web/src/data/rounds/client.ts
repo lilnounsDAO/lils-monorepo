@@ -7,6 +7,7 @@
 import { Address } from "viem";
 import {
   BallotAllocation,
+  ProposalVotes,
   Round,
   RoundActivityEvent,
   RoundAwardInput,
@@ -166,4 +167,8 @@ export function castRoundVotes(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export function getRoundProposalVotes(id: number, limit = 200): Promise<ProposalVotes> {
+  return request(`/proposals/${id}/votes?limit=${limit}`);
 }

@@ -119,6 +119,87 @@ function send(req, res, status, body, cache) {
 
 const PUBLIC_CACHE = "public, max-age=10, s-maxage=20, stale-while-revalidate=120";
 
+// ---------------------------------------------------------------------------
+// Imported images
+//
+// Both platforms served their images from their own IPFS gateways, which went
+// down with them. The public gateways that still hold the CIDs either rate
+// limit or send a Cross-Origin-Resource-Policy that stops a browser embedding
+// them, so pointing the pages straight at one does not work. Instead the first
+// request for a CID fetches it once, keeps the bytes, and every request after
+// that is served from here — content-addressed, so it can be cached forever.
+
+const IMAGE_GATEWAYS = (
+  env.IMAGE_GATEWAYS || "https://ipfs.io,https://dweb.link,https://gateway.pinata.cloud"
+)
+  .split(",")
+  .map((gateway) => gateway.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+const IMAGE_MAX_BYTES = Number(env.IMAGE_MAX_BYTES || 8 * 1024 * 1024);
+const IMAGE_TIMEOUT_MS = Number(env.IMAGE_TIMEOUT_MS || 15_000);
+const IMAGE_CACHE = "public, max-age=31536000, immutable";
+const CID = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{58,})$/;
+
+/** Two requests for the same cold CID wait on one fetch, not one each. */
+const imageFetches = new Map();
+
+async function fetchImage(cid) {
+  for (const gateway of IMAGE_GATEWAYS) {
+    const response = await fetch(`${gateway}/ipfs/${cid}`, {
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
+    }).catch(() => null);
+    if (!response?.ok) continue;
+
+    const mime = (response.headers.get("content-type") || "application/octet-stream")
+      .split(";")[0]
+      .trim();
+    if (!mime.startsWith("image/")) continue;
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > IMAGE_MAX_BYTES) continue;
+
+    await db.query(
+      `INSERT INTO rounds.image (cid, mime, bytes, size, source) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (cid) DO NOTHING`,
+      [cid, mime, bytes, bytes.length, gateway],
+    );
+    return { mime, bytes };
+  }
+  return null;
+}
+
+async function serveImage(req, res, cid) {
+  if (!CID.test(cid)) return send(req, res, 404, { error: "not found" });
+
+  const { rows: [cached] } = await db.query(
+    `SELECT mime, bytes FROM rounds.image WHERE cid = $1`,
+    [cid],
+  );
+
+  let image = cached;
+  if (!image) {
+    if (!imageFetches.has(cid)) {
+      imageFetches.set(cid, fetchImage(cid).finally(() => imageFetches.delete(cid)));
+    }
+    image = await imageFetches.get(cid);
+  }
+  // Nobody on the network still has it; the page drops the image and shows its
+  // own placeholder.
+  if (!image) return send(req, res, 404, { error: "not found" });
+
+  const origin = corsOrigin(req.headers.origin);
+  res.writeHead(200, {
+    "content-type": image.mime,
+    "content-length": image.bytes.length,
+    "cache-control": IMAGE_CACHE,
+    "cross-origin-resource-policy": "cross-origin",
+    "x-content-type-options": "nosniff",
+    vary: "Origin",
+    ...(origin && { "access-control-allow-origin": origin }),
+  });
+  res.end(req.method === "HEAD" ? undefined : image.bytes);
+}
+
 async function readJson(req, limit = 512 * 1024) {
   const chunks = [];
   let size = 0;
@@ -315,8 +396,15 @@ async function listRounds(url) {
        (SELECT count(DISTINCT v.voter) FROM rounds.vote v WHERE v.round_id = r.id) AS voter_count
      FROM rounds.round r
      WHERE ${where.join(" AND ")}
-     -- Live rounds first, then the most recently finished.
-     ORDER BY (${STATE_SQL} IN ('proposing', 'voting')) DESC, r.end_at DESC, r.id DESC
+     -- Live rounds first, then ones about to open, then the most recently
+     -- finished: the whole list reads top to bottom without a filter.
+     ORDER BY CASE ${STATE_SQL}
+                WHEN 'voting' THEN 0 WHEN 'proposing' THEN 0
+                WHEN 'pending' THEN 1 ELSE 2
+              END,
+              -- Upcoming rounds read soonest first; everyone else newest first.
+              CASE WHEN ${STATE_SQL} = 'pending' THEN r.start_at END ASC NULLS LAST,
+              r.end_at DESC, r.id DESC
      LIMIT $${args.length}`,
     args,
   );
@@ -357,6 +445,48 @@ async function listProposals(round) {
     [round.id, round.handle],
   );
   return rows.map(shapeProposal);
+}
+
+/**
+ * Who voted for one proposal, newest first. Separate from the activity feed
+ * because that one is capped for the whole round, and a popular proposal can
+ * carry more votes than the cap.
+ */
+async function listProposalVotes(proposalId, url) {
+  const limit = Math.min(Number(url.searchParams.get("limit") || 200) || 200, 500);
+  const { rows: [proposal] } = await db.query(
+    `SELECT p.id, p.title, p.vote_count::text AS vote_count, r.handle AS round_handle
+       FROM rounds.proposal p JOIN rounds.round r ON r.id = p.round_id
+      WHERE p.id = $1 AND p.visible`,
+    [Number(proposalId)],
+  );
+  if (!proposal) throw new HttpError(404, "proposal not found");
+
+  const { rows } = await db.query(
+    `SELECT v.id, v.created_at, v.voter, v.voter_name, v.voter_image, v.weight::text AS weight
+       FROM rounds.vote v
+      WHERE v.proposal_id = $1
+      ORDER BY v.created_at DESC, v.id DESC
+      LIMIT $2`,
+    [Number(proposalId), limit],
+  );
+
+  return {
+    proposal: {
+      id: Number(proposal.id),
+      title: proposal.title,
+      voteCount: proposal.vote_count,
+      roundHandle: proposal.round_handle,
+    },
+    votes: rows.map((row) => ({
+      id: Number(row.id),
+      timestamp: row.created_at,
+      voter: row.voter,
+      voterName: row.voter_name,
+      voterImage: row.voter_image,
+      weight: row.weight,
+    })),
+  };
 }
 
 /**
@@ -954,6 +1084,11 @@ const server = http.createServer(async (req, res) => {
       return send(req, res, 200, { ok: true, chainId: CHAIN_ID });
     }
 
+    if (segments[0] === "images" && segments.length === 2 &&
+        (req.method === "GET" || req.method === "HEAD")) {
+      return await serveImage(req, res, segments[1]);
+    }
+
     if (path === "/house" && req.method === "GET") {
       const { rows: [house] } = await db.query(
         `SELECT handle, name, description, image, treasury FROM rounds.house WHERE handle = $1`,
@@ -1004,6 +1139,11 @@ const server = http.createServer(async (req, res) => {
     if (segments[0] === "rounds" && segments.length === 4 && segments[2] === "power" && req.method === "GET") {
       const round = await getRound(segments[1]);
       return send(req, res, 200, await getPower(round, segments[3]));
+    }
+
+    if (segments[0] === "proposals" && segments.length === 3 && segments[2] === "votes" &&
+        req.method === "GET") {
+      return send(req, res, 200, await listProposalVotes(segments[1], url), PUBLIC_CACHE);
     }
 
     if (segments[0] === "proposals" && segments.length === 2) {
