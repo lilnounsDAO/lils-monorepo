@@ -156,6 +156,26 @@ async function uploadPending(images: PendingImage[], signer: ImageUploadSigner):
   return urls
 }
 
+/**
+ * Uploads one image straight to IPFS and returns its gateway url — for a single
+ * picture chosen in a form, rather than images embedded in markdown. Same
+ * signature and server as the editor's uploads, and the same reuse: an image
+ * sent before (same sha256) keeps its link instead of being sent again.
+ */
+export async function uploadImage(file: File, signer: ImageUploadSigner): Promise<string> {
+  if (!isImageFile(file)) throw new Error('Use a PNG, JPEG, GIF, or WebP image.')
+  if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name || 'This image'} is over 5 MB.`)
+
+  const hash = await hashBlob(file)
+  const stored = await readImage(hash).catch(() => undefined)
+  if (stored?.url) return stored.url
+
+  const urls = await uploadPending([{ hash, blob: file, name: file.name }], signer)
+  const url = urls.get(hash)
+  if (!url) throw new Error('The image did not upload.')
+  return url
+}
+
 function dataUrlToBlob(dataUrl: string): Blob {
   const [header, base64] = dataUrl.split(',')
   const type = header.slice(5, header.indexOf(';'))

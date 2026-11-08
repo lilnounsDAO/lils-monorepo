@@ -17,11 +17,13 @@
   VITE_CHAIN_ID = "1"          # Ethereum mainnet
   VITE_DAO_VERSION = "2"       # DAO version 2 for production
   VITE_DIGEST_API_URL = "https://db.lilnouns.wtf/api/digest"  # mainnet digest indexer (VPS)
+  VITE_ROUNDS_API_URL = "https://db.lilnouns.wtf/api/funding"  # funded rounds (services/rounds-api on the VPS)
 
 [context."staging".environment]
   VITE_CHAIN_ID = "1"   # Ethereum mainnet for staging
   VITE_DAO_VERSION = "5"   # DAO version 5 for staging
   VITE_DIGEST_API_URL = "https://db.lilnouns.wtf/api/digest"  # mainnet digest indexer (VPS)
+  VITE_ROUNDS_API_URL = "https://db.lilnouns.wtf/api/funding"  # funded rounds (services/rounds-api on the VPS)
 
 [context.deploy-preview.environment]
   VITE_CHAIN_ID = "11155111"   # Sepolia for previews
