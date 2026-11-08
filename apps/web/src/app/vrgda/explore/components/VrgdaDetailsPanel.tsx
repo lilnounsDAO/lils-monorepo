@@ -446,15 +446,13 @@ export const VrgdaDetailsPanel: React.FC<VrgdaDetailsPanelProps> = ({
                   isCompact ? 'gap-1 pb-0.5 last:pb-0' : 'gap-2 pb-1 last:pb-0'
                 }`}
               >
-                <div className={`flex-shrink-0 rounded-md bg-gray-100 flex items-center justify-center ${
-                  isCompact 
-                    ? (trait.category === 'Glasses' ? 'w-12 h-8' : 'w-8 h-8')
-                    : (trait.category === 'Glasses' ? 'w-16 h-12' : 'w-12 h-12')
+                <div className={`flex-shrink-0 overflow-hidden rounded-md bg-gray-100 flex items-center justify-center ${
+                  isCompact ? 'w-8 h-8' : 'w-12 h-12'
                 }`}>
                   <img
                     src={trait.image}
                     alt={`${trait.category} ${trait.value}`}
-                    className="object-contain w-full h-full"
+                    className="object-contain w-full h-full [image-rendering:pixelated]"
                   />
                 </div>
                 <div className="flex w-full flex-col">

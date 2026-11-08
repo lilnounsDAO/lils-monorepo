@@ -18,6 +18,7 @@ import TopicsDialog from '@/components/dialog/TopicsDialog'
 import { useQueryClient } from '@tanstack/react-query'
 import { Topic, getTopics, makeTopicUrlId } from '@/data/goldsky/governance/getTopics'
 import { isDaoVersion5 } from '@/utils/daoVersion'
+import { RefundBalanceNotice } from '@/components/RefundBalanceNotice'
 import { useDiscordEvents } from '@/hooks/useDiscordEvents'
 import { formatEventDateTime, getDiscordEventUrl } from '@/data/discord/getScheduledEvents'
 
@@ -286,6 +287,8 @@ Feel free to experiment with this test topic!`,
                   )}
                 </p>
               </div>
+
+              {daoType !== 'nouns' && <RefundBalanceNotice />}
               
               {/* DAO Selection Buttons */}
               <div className="flex items-center gap-3">

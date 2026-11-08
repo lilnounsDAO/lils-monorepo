@@ -25,6 +25,7 @@ import { formatTimeLeft } from "@/utils/format";
 import Icon from "@/components/ui/Icon";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { isDaoVersion5 } from "@/utils/daoVersion";
+import { RefundBalanceNotice } from "@/components/RefundBalanceNotice";
 
 export type DigestTab =
   | "digest"
@@ -261,6 +262,7 @@ function DigestSummary({
 
   return (
     <div className="flex flex-col gap-6">
+      <RefundBalanceNotice />
       {ongoing.length > 0 && (
         <SidebarSection title="Ongoing proposals">
           {ongoing.map((proposal) => (

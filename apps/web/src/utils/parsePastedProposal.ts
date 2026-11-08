@@ -22,7 +22,7 @@ export function markdownToDescendants(markdown: string): Descendant[] {
   }
 
   return blocks.map((block) => {
-    const image = block.match(/^!\[([^\]]*)\]\((data:image\/png;base64,[A-Za-z0-9+/=]+|https?:\/\/[^)\s]+)\)$/)
+    const image = block.match(/^!\[([^\]]*)\]\((data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+|local-image:[0-9a-f]{64}|https?:\/\/[^)\s]+)\)$/)
     if (image) {
       return {
         type: 'image',

@@ -1,18 +1,43 @@
 import { useEffect, useState } from "react";
 import { getImageSize } from "@/data/image/getImageSize";
 import { Skeleton } from "../ui/skeleton";
+import { resolveImageSrc } from "@/utils/localImages";
 
 export default function MarkdownImage({
-  src,
+  src: rawSrc,
   title,
 }: {
   src?: string;
   title?: string;
 }) {
+  const [src, setSrc] = useState<string | undefined>(() =>
+    rawSrc?.startsWith("local-image:") ? undefined : rawSrc,
+  );
+  const [resolving, setResolving] = useState(Boolean(rawSrc?.startsWith("local-image:")));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!rawSrc) {
+      setSrc(undefined);
+      setResolving(false);
+      return;
+    }
+    setResolving(true);
+    resolveImageSrc(rawSrc).then((next) => {
+      if (cancelled) return;
+      setSrc(next);
+      setResolving(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawSrc]);
+
   const [dimensions, setDimensions] = useState<{ width?: number; height?: number }>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (resolving) return;
     if (!src) {
       setLoading(false);
       return;
@@ -22,13 +47,13 @@ export default function MarkdownImage({
       setDimensions(size);
       setLoading(false);
     });
-  }, [src]);
+  }, [src, resolving]);
 
-  if (!src) {
+  if (!src && !resolving) {
     return null;
   }
 
-  if (loading) {
+  if (loading || resolving) {
     return <span className="block h-[300px] w-full animate-pulse rounded-md bg-background-secondary" />;
   }
 

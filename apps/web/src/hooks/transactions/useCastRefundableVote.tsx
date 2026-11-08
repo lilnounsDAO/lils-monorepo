@@ -8,7 +8,7 @@ import { useCallback } from "react";
 
 import { CustomTransactionValidationError } from "./types";
 import { useAccount } from "wagmi";
-import { getBlock, multicall } from "viem/actions";
+import { getBalance, getBlock, getBytecode, multicall } from "viem/actions";
 import { CHAIN_CONFIG } from "@/config";
 import { nounsDaoLogicConfig } from "@/data/generated/wagmi";
 import { getProposal } from "@/data/goldsky/governance/getProposal";
@@ -247,13 +247,46 @@ export function useCastRefundableVote(): UseCastRefundableVoteReturnType {
   );
 
   const castRefundableVote = useCallback(
-    (
+    async (
       proposalId: number,
       vote: "for" | "against" | "abstain",
       reason?: string,
     ) => {
+      // Use the plain vote (no refund) when:
+      // - the governor's refund balance is empty (refunds are paid from it)
+      // - the voter is a contract wallet (Safe): the refund goes to tx.origin (the executing signer),
+      //   and castRefundableVote reverts inside Safe execTransaction (GS013) while castVote works
+      let refundable = true;
+      try {
+        const [refundBalance, voterCode] = await Promise.all([
+          getBalance(CHAIN_CONFIG.publicClient, {
+            address: CHAIN_CONFIG.addresses.nounsDaoProxy,
+          }),
+          address
+            ? getBytecode(CHAIN_CONFIG.publicClient, { address })
+            : Promise.resolve(undefined),
+        ]);
+        const isContractWallet = !!voterCode && voterCode !== "0x";
+        refundable = refundBalance > BigInt(0) && !isContractWallet;
+      } catch (e) {
+        console.warn("Failed to check refund eligibility, using refundable vote", e);
+      }
+
       let data: Hex;
-      if (reason && reason != "") {
+      if (!refundable) {
+        data =
+          reason && reason != ""
+            ? encodeFunctionData({
+                abi: nounsDaoLogicConfig.abi,
+                functionName: "castVoteWithReason",
+                args: [BigInt(proposalId), VOTE_MAP[vote], reason],
+              })
+            : encodeFunctionData({
+                abi: nounsDaoLogicConfig.abi,
+                functionName: "castVote",
+                args: [BigInt(proposalId), VOTE_MAP[vote]],
+              });
+      } else if (reason && reason != "") {
         data = encodeFunctionData({
           abi: nounsDaoLogicConfig.abi,
           functionName: "castRefundableVoteWithReason",
@@ -280,7 +313,7 @@ export function useCastRefundableVote(): UseCastRefundableVoteReturnType {
         () => castRefundableVoteValidation(proposalId, vote, reason),
       );
     },
-    [sendTransaction, castRefundableVoteValidation],
+    [sendTransaction, castRefundableVoteValidation, address],
   );
 
   return { castRefundableVote, ...other };

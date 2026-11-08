@@ -134,7 +134,7 @@ export function buildNounImage(
 
 const TRAIT_TYPE_VIEW_BOX: Record<NounTraitType, string> = {
   head: "10 -20 300 300",
-  glasses: "70 60 160 160",
+  glasses: "40 70 220 220", // glasses span x 50-250, y 140-220
   body: "90 195 140 140",
   accessory: "90 195 140 140",
   background: "0 0 320 320",

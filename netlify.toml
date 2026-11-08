@@ -9,6 +9,8 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--no-fund --no-audit"
   NODE_OPTIONS = "--max_old_space_size=4096"
+  # Proposal editor image uploads (services/ipfs-upload on the VPS; wallet-signed, no secrets here).
+  VITE_IPFS_UPLOAD_URL = "https://db.lilnouns.wtf/api/ipfs/upload"
 
 # Environment per Netlify context; override in the Netlify UI if needed.
 [context.production.environment]

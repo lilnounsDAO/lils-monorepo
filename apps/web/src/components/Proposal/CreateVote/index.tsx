@@ -21,6 +21,7 @@ import {
   DrawerTrigger,
 } from "../../ui/drawer";
 import { useCastRefundableVote } from "@/hooks/transactions/useCastRefundableVote";
+import { RefundBalanceNotice } from "@/components/RefundBalanceNotice";
 import TransactionButton from "@/components/TransactionButton";
 import { DetailedProposal, ProposalVote } from "@/data/goldsky/governance/common";
 import { TransactionState } from "@/hooks/transactions/types";
@@ -124,6 +125,7 @@ export function CreateVote({ proposal }: { proposal: DetailedProposal }) {
     <>
       {/* Desktop */}
       <div className="sticky bottom-0 z-10 hidden w-full max-w-[780px] flex-col items-center gap-2 rounded-t-[20px] bg-background-primary pb-8 lg:flex">
+        <RefundBalanceNotice compact className="w-full" />
         <CreateVoteForm
           proposal={proposal}
           form={form}
@@ -153,6 +155,7 @@ export function CreateVote({ proposal }: { proposal: DetailedProposal }) {
           <DrawerContent className="flex-col gap-6 p-6 shadow-fixed-bottom">
             <DrawerTitle className="heading-4">Vote</DrawerTitle>
             <div className="flex flex-col gap-2">
+              <RefundBalanceNotice compact />
               <CreateVoteForm
                 proposal={proposal}
                 form={form}

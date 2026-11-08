@@ -33,6 +33,8 @@ export default function MarkdownRenderer({
         const dataProtocolSanitized = /^data:image\/png/.test(dataProtocol)
           ? dataProtocol
           : "";
+        // local-image: refs are editor drafts held in this browser (see utils/localImages).
+        if (/^local-image:[0-9a-f]{64}$/.test(url)) return url;
         return protocolSanitized != ""
           ? protocolSanitized
           : dataProtocolSanitized;

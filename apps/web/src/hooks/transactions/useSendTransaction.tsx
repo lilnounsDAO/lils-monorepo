@@ -6,6 +6,7 @@ import {
   InsufficientFundsError,
   TransactionReceipt,
   UserRejectedRequestError,
+  WaitForTransactionReceiptTimeoutError,
 } from "viem";
 import {
   useAccount,
@@ -30,6 +31,7 @@ import { estimateGas, getGasPrice, getBytecode } from "viem/actions";
 // import { simulateCalls } from "viem/actions";
 import { useSwitchChainCustom } from "../useSwitchChainCustom";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { resolveSafeTxHash } from "./resolveSafeTxHash";
 
 const GAS_BUFFER = 0.35; // Gives buffer on gas estimate to help prevent out of gas error
 
@@ -62,9 +64,11 @@ export function useSendTransaction(): UseSendTransactionReturnType {
 
   const [validationError, setValidationError] =
     useState<CustomTransactionValidationError | null>(null);
+  // On-chain hash, differs from the hash the wallet returned for Safe wallets (safeTxHash)
+  const [hash, setHash] = useState<Hash | undefined>(undefined);
+  const [awaitingSafe, setAwaitingSafe] = useState<boolean>(false);
 
   const {
-    data: hash,
     sendTransactionAsync: sendTransactionWagmi,
     reset: resetSendTransaction,
     error: sendTransactionError,
@@ -172,13 +176,32 @@ export function useSendTransaction(): UseSendTransactionReturnType {
           }
 
           try {
-            const hash = await sendTransactionWagmi({
+            setHash(undefined);
+            const sentHash = await sendTransactionWagmi({
               ...request,
               chainId: CHAIN_CONFIG.chain.id,
               gas: gasEstimateWithBuffer,
               account: accountAddress,
             });
-            addTransaction?.(hash, logging);
+
+            let txHash: Hash | null = sentHash;
+            if (isContractWallet) {
+              setAwaitingSafe(true);
+              txHash = await resolveSafeTxHash(sentHash);
+              setAwaitingSafe(false);
+              if (!txHash) {
+                setValidationError(
+                  new CustomTransactionValidationError(
+                    "SAFE_NOT_EXECUTED",
+                    "Safe transaction hasn't been executed yet. Check your Safe app for remaining signatures.",
+                  ),
+                );
+                return;
+              }
+            }
+
+            setHash(txHash);
+            addTransaction?.(txHash, logging);
           } catch (e) {
             // Ignore, we handle this below
           }
@@ -199,6 +222,8 @@ export function useSendTransaction(): UseSendTransactionReturnType {
 
   function reset() {
     setValidationError(null);
+    setHash(undefined);
+    setAwaitingSafe(false);
     resetSendTransaction();
   }
 
@@ -211,7 +236,7 @@ export function useSendTransaction(): UseSendTransactionReturnType {
   const state = useMemo(() => {
     if (pendingSignature) {
       return "pending-signature";
-    } else if (txnPending) {
+    } else if (awaitingSafe || txnPending) {
       return "pending-txn";
     } else if (txnFailed) {
       return "failed";
@@ -220,7 +245,7 @@ export function useSendTransaction(): UseSendTransactionReturnType {
     } else {
       return "idle";
     }
-  }, [pendingSignature, txnPending, txnFailed, txnSuccess]);
+  }, [pendingSignature, awaitingSafe, txnPending, txnFailed, txnSuccess]);
 
   return { state, error, hash, receipt, sendTransaction, reset };
 }
@@ -273,6 +298,13 @@ function parseError(
       };
     }
   } else if (waitForReceiptError) {
+    if (waitForReceiptError instanceof WaitForTransactionReceiptTimeoutError) {
+      return {
+        raw: waitForReceiptError,
+        message:
+          "Transaction wasn't included in a block. If you use MetaMask Smart Transactions, turn it off in MetaMask Settings > Advanced and try again.",
+      };
+    }
     return {
       raw: waitForReceiptError,
       message: "Error waiting for transaction receipt.",

@@ -1,0 +1,14 @@
+{
+  "name": "@lils/ipfs-upload",
+  "private": true,
+  "type": "module",
+  "description": "Wallet-signed image uploads for the proposal editor, pinned on a self-hosted Kubo node.",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "dev": "node --watch src/index.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.16.3",
+    "viem": "^2.38.1"
+  }
+}

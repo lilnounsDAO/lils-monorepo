@@ -1,8 +1,10 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import React, { forwardRef, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { Descendant } from 'slate'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import { messageUtils } from '@/utils/message-utils'
 import { markdownToDescendants } from '@/utils/parsePastedProposal'
+import { isImageFile, storeLocalImage } from '@/utils/localImages'
+import { ToastContext, ToastType } from '@/providers/toast'
 import type { RichTextNode } from './RichTextEditor'
 
 const emptyParagraph = (): Descendant => ({ type: 'paragraph', children: [{ text: '' }] })
@@ -244,6 +246,8 @@ function applyInlineToggle(markdown: string, start: number, end: number, format:
 type BlockSelection = { anchor: number, focus: number }
 type DragState = { active: boolean, anchor: number, focus: number, moved: boolean }
 
+const BLOCK_DRAG_TYPE = 'application/x-lilnouns-block'
+
 function selectionBounds(selection: BlockSelection) {
   return {
     start: Math.min(selection.anchor, selection.focus),
@@ -274,6 +278,9 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
     onActiveFormatsRef.current = onActiveFormats
     const suppressBlurRef = useRef(false)
     const beginEditRef = useRef<(index: number) => void>(() => {})
+    const blockDragSourceRef = useRef<{ start: number, end: number } | null>(null)
+    const [dropIndex, setDropIndex] = useState<number | null>(null)
+    const { addToast } = useContext(ToastContext)
     valueRef.current = blocks
     selectionRef.current = selection
 
@@ -474,6 +481,124 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
       const block = element?.closest('[data-block-index]')
       const index = Number(block?.getAttribute('data-block-index'))
       return Number.isInteger(index) ? index : null
+    }
+
+    // Commits the block being edited and says how later indexes moved.
+    const commitEditing = () => {
+      const editing = editingRef.current
+      const current = valueRef.current
+      if (editing === null) {
+        return { current, shift: (i: number) => i, shiftEnd: (i: number) => i }
+      }
+      const committed = commitIndex(editing, draftRef.current)
+      const added = committed.length - current.length
+      editingRef.current = null
+      setEditingIndex(null)
+      return {
+        current: committed,
+        shift: (i: number) => (i > editing ? i + added : i),
+        shiftEnd: (i: number) => (i >= editing ? i + added : i),
+      }
+    }
+
+    const insertionIndexAt = (clientY: number) => {
+      const nodes = containerRef.current?.querySelectorAll<HTMLElement>(':scope > [data-block-index]')
+      if (!nodes) return valueRef.current.length
+      for (const node of Array.from(nodes)) {
+        const rect = node.getBoundingClientRect()
+        if (clientY < rect.top + rect.height / 2) return Number(node.dataset.blockIndex)
+      }
+      return nodes.length
+    }
+
+    const moveBlocks = (start: number, end: number, at: number) => {
+      suppressBlurRef.current = true
+      const original = valueRef.current
+      const { current, shift, shiftEnd } = commitEditing()
+      const lo = shift(start)
+      const hi = shiftEnd(end)
+      const to = shift(at)
+      let next = current
+      if (to < lo || to > hi + 1) {
+        const moving = current.slice(lo, hi + 1)
+        next = [...current.slice(0, lo), ...current.slice(hi + 1)]
+        const target = to > hi ? to - moving.length : to
+        next.splice(target, 0, ...moving)
+        rememberSelection(moving.length > 1 ? { anchor: target, focus: target + moving.length - 1 } : null)
+      }
+      valueRef.current = next
+      if (next !== original) emit(next)
+      requestAnimationFrame(() => {
+        suppressBlurRef.current = false
+      })
+    }
+
+    const insertImages = async (files: File[], at: number) => {
+      const images = files.filter(isImageFile)
+      if (images.length < files.length) {
+        addToast?.({ content: 'Only PNG, JPEG, GIF, and WebP images can be added.', type: ToastType.Failure })
+      }
+      if (images.length === 0) return
+      let markdown: string[]
+      try {
+        markdown = await Promise.all(images.map(storeLocalImage))
+      } catch (error) {
+        addToast?.({
+          content: error instanceof Error ? error.message : 'Could not add that image.',
+          type: ToastType.Failure,
+        })
+        return
+      }
+      suppressBlurRef.current = true
+      const { current, shift } = commitEditing()
+      const parsed = markdown.flatMap((item) => markdownToDescendants(item))
+      const blank = current.length === 1 && !blockMarkdown(current[0]).trim()
+      const next = blank ? parsed : [...current]
+      if (!blank) next.splice(Math.min(shift(at), current.length), 0, ...parsed)
+      valueRef.current = next
+      rememberSelection(null)
+      emit(next)
+      requestAnimationFrame(() => {
+        suppressBlurRef.current = false
+      })
+    }
+
+    const isBlockDrag = (event: React.DragEvent) => event.dataTransfer.types.includes(BLOCK_DRAG_TYPE)
+    const isFileDrag = (event: React.DragEvent) => event.dataTransfer.types.includes('Files')
+
+    const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+      if (readOnly || (!isBlockDrag(event) && !isFileDrag(event))) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = isBlockDrag(event) ? 'move' : 'copy'
+      const index = insertionIndexAt(event.clientY)
+      setDropIndex((current) => (current === index ? current : index))
+    }
+
+    const onDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+      const next = event.relatedTarget
+      if (next instanceof Node && event.currentTarget.contains(next)) return
+      setDropIndex(null)
+    }
+
+    const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+      if (readOnly || (!isBlockDrag(event) && !isFileDrag(event))) return
+      event.preventDefault()
+      const at = insertionIndexAt(event.clientY)
+      setDropIndex(null)
+      const source = blockDragSourceRef.current
+      blockDragSourceRef.current = null
+      if (isBlockDrag(event)) {
+        if (source) moveBlocks(source.start, source.end, at)
+        return
+      }
+      void insertImages(Array.from(event.dataTransfer.files), at)
+    }
+
+    const onPasteImages = (event: React.ClipboardEvent, at: number) => {
+      const files = Array.from(event.clipboardData.files)
+      if (readOnly || files.length === 0 || !files.some(isImageFile)) return
+      event.preventDefault()
+      void insertImages(files, at)
     }
 
     useEffect(() => {
@@ -818,6 +943,14 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
         tabIndex={readOnly ? undefined : 0}
         className="flex flex-col gap-1 outline-none"
         onKeyDown={readOnly ? undefined : onContainerKeyDown}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onPaste={(event) => {
+          if (event.target instanceof HTMLTextAreaElement) return
+          const current = selectionRef.current
+          onPasteImages(event, current ? selectionBounds(current).end + 1 : valueRef.current.length)
+        }}
       >
         {blocks.map((block, index) => {
           const markdown = blockMarkdown(block)
@@ -826,21 +959,52 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
           const selected = bounds !== null && index >= bounds.start && index <= bounds.end && !editing
           return (
             <div key={index} data-block-index={index} className={`group relative rounded-md ${selected ? 'bg-sky-100' : ''}`}>
+              {dropIndex === index && (
+                <div className="pointer-events-none absolute -top-1 left-0 right-0 z-20 h-0.5 rounded bg-sky-500" />
+              )}
               {!readOnly && (
-                <button
-                  type="button"
-                  className="absolute right-0 top-0 z-10 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 group-hover:opacity-100"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    if (editing) {
-                      stopEditing(index, draftRef.current)
-                    } else {
-                      beginEdit(index)
-                    }
-                  }}
-                >
-                  {editing ? 'Preview' : 'Edit'}
-                </button>
+                <div className="absolute right-0 top-0 z-10 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    draggable
+                    data-block-control="true"
+                    aria-label="Drag to move block"
+                    title="Drag to move"
+                    className="cursor-grab rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-500 shadow-sm hover:bg-gray-50 hover:text-gray-800 active:cursor-grabbing"
+                    onDragStart={(event) => {
+                      const current = selectionRef.current
+                      const bounds = current ? selectionBounds(current) : null
+                      const range = bounds && index >= bounds.start && index <= bounds.end
+                        ? bounds
+                        : { start: index, end: index }
+                      blockDragSourceRef.current = range
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData(BLOCK_DRAG_TYPE, String(index))
+                      const blockElement = event.currentTarget.closest('[data-block-index]')
+                      if (blockElement) event.dataTransfer.setDragImage(blockElement, 16, 12)
+                    }}
+                    onDragEnd={() => {
+                      blockDragSourceRef.current = null
+                      setDropIndex(null)
+                    }}
+                  >
+                    ⋮⋮
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-600 shadow-sm hover:bg-gray-50"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      if (editing) {
+                        stopEditing(index, draftRef.current)
+                      } else {
+                        beginEdit(index)
+                      }
+                    }}
+                  >
+                    {editing ? 'Preview' : 'Edit'}
+                  </button>
+                </div>
               )}
               {editing ? (
                 <textarea
@@ -872,6 +1036,7 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
                     }
                   }}
                   onKeyDown={onTextKeyDown}
+                  onPaste={(event) => onPasteImages(event, index + 1)}
                   onBlur={(event) => {
                     if (suppressBlurRef.current) return
                     if (editingRef.current !== index) return
@@ -909,6 +1074,9 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
             </div>
           )
         })}
+        {dropIndex !== null && dropIndex >= blocks.length && (
+          <div className="pointer-events-none h-0.5 rounded bg-sky-500" />
+        )}
         {!readOnly && (
           <button
             type="button"
@@ -932,7 +1100,7 @@ const MarkdownBlockEditor = forwardRef<MarkdownBlockEditorHandle, MarkdownBlockE
         )}
         {!readOnly && (
           <p className="mt-1 text-xs text-gray-400">
-            Drag across blocks to select them. Backspace deletes the selection and continues through the text.
+            Drag across blocks to select them. Drag ⋮⋮ to move a block. Drop or paste images to add them; they upload to IPFS when you propose or share.
           </p>
         )}
       </div>

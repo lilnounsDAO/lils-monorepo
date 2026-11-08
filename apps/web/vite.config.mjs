@@ -102,6 +102,15 @@ export default defineConfig({
       // Allow serving files from workspace packages
       allow: ['..', '../..'],
     },
+    proxy: {
+      // Proposal editor image uploads (services/ipfs-upload on the VPS).
+      // For a local service: IPFS_UPLOAD_PROXY_TARGET=http://127.0.0.1:3030/upload
+      '/api/ipfs/upload': {
+        target: new URL(process.env.IPFS_UPLOAD_PROXY_TARGET || 'https://db.lilnouns.wtf/api/ipfs/upload').origin,
+        changeOrigin: true,
+        rewrite: () => new URL(process.env.IPFS_UPLOAD_PROXY_TARGET || 'https://db.lilnouns.wtf/api/ipfs/upload').pathname,
+      },
+    },
   },
   
   // Build configuration

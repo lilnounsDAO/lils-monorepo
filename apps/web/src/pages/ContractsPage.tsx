@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { Address, getAddress } from "viem";
 import { Button } from "@/components/ui/button";
+import { RefundBalanceNotice } from "@/components/RefundBalanceNotice";
 import { LinkExternal } from "@/components/ui/link";
 import { CHAIN_SPECIFIC_CONFIGS } from "@/config";
 import { detectChainFromHostname } from "@/utils/networkDetection";
@@ -154,6 +155,8 @@ export default function ContractsPage() {
               Live addresses for Lil Nouns on mainnet and the Sepolia rehearsal suite. Click through to Etherscan.
             </p>
           </div>
+
+          <RefundBalanceNotice showWhenHealthy />
 
           <div className="flex flex-wrap gap-3">
             {NETWORKS.map((id) => (

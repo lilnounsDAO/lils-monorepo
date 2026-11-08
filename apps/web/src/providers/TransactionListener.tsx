@@ -8,9 +8,11 @@ import { LinkExternal } from "@/components/ui/link";
 import { useAddRecentTransaction } from "@rainbow-me/rainbowkit";
 import { trackEvent } from "@/data/analytics/trackEvent";
 
+const RECEIPT_TIMEOUT_MS = 1000 * 60 * 5; // Matches useSendTransaction
+
 export interface Transaction {
   hash: Hex;
-  status: "pending" | "success" | "reverted";
+  status: "pending" | "success" | "reverted" | "dropped";
 }
 
 interface TransactionListenerContextType {
@@ -64,10 +66,35 @@ export function TransactionListenerProvider({
 
       addRecentTransaction({ hash, description: logging.description });
 
-      const receipt = await waitForTransactionReceipt(
-        CHAIN_CONFIG.publicClient,
-        { hash },
-      );
+      let receipt;
+      try {
+        receipt = await waitForTransactionReceipt(CHAIN_CONFIG.publicClient, {
+          hash,
+          timeout: RECEIPT_TIMEOUT_MS,
+        });
+      } catch (e) {
+        // Never mined (e.g. dropped by MetaMask Smart Transactions relay)
+        console.error("Transaction not included", hash, e);
+        if (pendingToastId != undefined) {
+          removeToast?.(pendingToastId);
+        }
+        setTransactions((transactions) => [
+          ...transactions.filter((txn) => txn.hash != hash),
+          { hash, status: "dropped" },
+        ]);
+        addToast?.({
+          content: (
+            <span>
+              {logging.description} wasn&apos;t included in a block. If you use
+              MetaMask Smart Transactions, turn it off in Settings &gt; Advanced
+              and try again.
+            </span>
+          ),
+          type: ToastType.Failure,
+        });
+        trackEvent(`${logging.type}-txn-dropped`, { hash: hash.toString() });
+        return;
+      }
       if (pendingToastId != undefined) {
         removeToast?.(pendingToastId);
       }

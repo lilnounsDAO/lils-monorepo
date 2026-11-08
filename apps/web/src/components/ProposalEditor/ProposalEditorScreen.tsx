@@ -3,7 +3,8 @@ import { useParams, useLocation } from 'react-router-dom'
 import { Descendant } from 'slate'
 import ProposalEditor from './ProposalEditor'
 import { createEmptyParagraphElement } from './RichTextEditor'
-import { useAccount } from 'wagmi'
+import { useAccount, useSignMessage } from 'wagmi'
+import { CHAIN_CONFIG } from '@/config'
 import type { Action } from '@/types/proposal-editor'
 import { useCreateProposal } from '@/hooks/transactions/useCreateProposal'
 import { useCreateProposalCandidate } from '@/hooks/transactions/useCreateProposalCandidate'
@@ -18,6 +19,7 @@ import {
   MAINNET_V5_UPGRADE_TITLE,
 } from '@/data/mainnetV5UpgradeProposal'
 import { loadEditorDrafts } from '@/utils/editorDrafts'
+import { uploadLocalImages } from '@/utils/localImages'
 
 const ProposalEditorScreen: React.FC = () => {
   const { id, draftId } = useParams<{ id?: string; draftId?: string }>()
@@ -26,6 +28,7 @@ const ProposalEditorScreen: React.FC = () => {
     : undefined
   const location = useLocation()
   const { address } = useAccount()
+  const { signMessageAsync } = useSignMessage()
   const { addToast } = useContext(ToastContext)
 
   // Determine mode from route
@@ -94,7 +97,12 @@ const ProposalEditorScreen: React.FC = () => {
 
     try {
       // Convert body (Descendant[]) to markdown string
-      const bodyMarkdown = messageUtils.descendantsToMarkdown(body as any)
+      // Images dropped into the editor are uploaded to IPFS now and linked inline.
+      const bodyMarkdown = await uploadLocalImages(messageUtils.descendantsToMarkdown(body as any), {
+        address,
+        chainId: CHAIN_CONFIG.chain.id,
+        signMessage: (message) => signMessageAsync({ message }),
+      })
 
       if (submissionType === 'topic') {
         // Create topic (no actions needed)

@@ -249,9 +249,7 @@ export const CompactDetailsModal: React.FC<CompactDetailsModalProps> = ({
                       <img
                         src={trait.image}
                         alt={`${trait.category} ${trait.value}`}
-                        className={`rounded object-cover bg-gray-100 ${
-                          trait.category === 'Glasses' ? 'w-12 h-8' : 'w-10 h-10'
-                        }`}
+                        className="h-10 w-10 shrink-0 rounded bg-gray-100 object-contain [image-rendering:pixelated]"
                       />
                       <div className="flex-1">
                         <span className="text-xs font-bold uppercase tracking-wide text-gray-600">

@@ -21,6 +21,7 @@ import { messageUtils } from '@/utils/message-utils'
 import { ToastContext, ToastType } from '@/providers/toast'
 import { useNavigate } from 'react-router-dom'
 import { isDaoVersion5 } from '@/utils/daoVersion'
+import { uploadLocalImages, type ImageUploadSigner } from '@/utils/localImages'
 import { markdownToDescendants, parsePastedProposal } from '@/utils/parsePastedProposal'
 import {
   formatEditorDraftTime,
@@ -90,6 +91,10 @@ interface ProposalEditorProps {
   enableDrafts?: boolean
 }
 
+function blockExcerpt(block: Descendant | undefined) {
+  return Node.string(block || { text: '' }).replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+
 const ProposalEditor: React.FC<ProposalEditorProps> = ({
   title,
   body,
@@ -116,6 +121,9 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
 }) => {
   const { address } = useAccount()
   const { signMessageAsync } = useSignMessage()
+  const imageSigner: ImageUploadSigner | null = address
+    ? { address, chainId: CHAIN_CONFIG.chain.id, signMessage: (message) => signMessageAsync({ message }) }
+    : null
   const { addToast } = useContext(ToastContext)
   const navigate = useNavigate()
   const isVersion5 = isDaoVersion5()
@@ -372,6 +380,35 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
   }, [mode, onActionsChange])
 
   const currentMarkdown = messageUtils.descendantsToMarkdown(currentBody as any)
+
+  // Block comments follow their block's text, so moving, adding or removing blocks
+  // keeps them on the right block. The stored index is the fallback once the text changes.
+  const blockCommentIndex = useMemo(() => {
+    const placed = new Map<string, number>()
+    if (!activeShared) return placed
+    const excerpts = currentBody.map((block) => blockExcerpt(block))
+    const closest = (stored: number, matches: (excerpt: string) => boolean) => {
+      let best = -1
+      excerpts.forEach((excerpt, index) => {
+        if (!matches(excerpt)) return
+        if (best < 0 || Math.abs(index - stored) < Math.abs(best - stored)) best = index
+      })
+      return best
+    }
+    for (const comment of activeShared.comments) {
+      if (comment.target !== 'block') continue
+      const stored = comment.blockIndex ?? -1
+      const want = comment.blockExcerpt.trim()
+      let index = want ? closest(stored, (excerpt) => excerpt === want) : -1
+      if (index < 0 && want.length >= 24) {
+        const head = want.slice(0, 24)
+        index = closest(stored, (excerpt) => excerpt.startsWith(head))
+      }
+      if (index < 0 && stored >= 0 && stored < excerpts.length) index = stored
+      if (index >= 0) placed.set(comment.id, index)
+    }
+    return placed
+  }, [activeShared, currentBody])
   const visibleDrafts = drafts.filter((draft) => draft.contentType === contentType)
   const visibleShared = sharedProposals.filter((proposal) => proposal.contentType === contentType)
   const activeDraft = visibleDrafts.find((draft) => draft.id === activeDraftId) ?? null
@@ -579,6 +616,8 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
     setSharing(true)
     setAwaitingWallet(true)
     try {
+      // Shared drafts carry IPFS links, never images that only exist in this browser.
+      draft = { ...draft, bodyMarkdown: await uploadLocalImages(draft.bodyMarkdown, imageSigner) }
       const digest = await sha256Hex(proposalCanonical(draft))
       const exists = sharedProposals.some((item) => item.id === draft.id) || activeShared?.id === draft.id
       const send = async (action: 'create' | 'update') => {
@@ -1229,7 +1268,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
     try {
       // Convert body (Descendant[]) to markdown string
-      const bodyMarkdown = messageUtils.descendantsToMarkdown(currentBody as any)
+      const bodyMarkdown = await uploadLocalImages(messageUtils.descendantsToMarkdown(currentBody as any), imageSigner)
 
       if (actualProposalId && proposal) {
         // Update proposal
@@ -2122,8 +2161,8 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
             readOnly={editorDisabled}
             toolbarSlot={enableDrafts ? formatSlot : null}
             renderBlockFooter={activeShared ? (index) => {
-              const excerpt = Node.string(currentBody[index] || { text: '' }).replace(/\s+/g, ' ').trim().slice(0, 180) || 'This block'
-              const comments = activeShared.comments.filter((comment) => comment.target === 'block' && comment.blockIndex === index)
+              const excerpt = blockExcerpt(currentBody[index]) || 'This block'
+              const comments = activeShared.comments.filter((comment) => comment.target === 'block' && blockCommentIndex.get(comment.id) === index)
               const open = inlineTarget?.target === 'block' && inlineTarget.blockIndex === index
               return (
                 <div className="px-1 pb-2">
