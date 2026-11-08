@@ -24,6 +24,7 @@ const ALL_DESKTOP_NAV_ITEMS: NavItem[] = [
       { name: "Proposals", icon: "vote", href: "/vote" },
       { name: "Candidates", icon: "vote", href: "/candidates" },
       { name: "Topics", icon: "lightning", href: "/topics" },
+      { name: "Rounds", icon: "vote", href: "/rounds", new: true },
     ],
   },
   { name: "Learn", icon: "book", href: "/learn" },
@@ -57,4 +58,5 @@ export const GOVERNANCE_HREFS = [
   "/vote",
   "/candidates",
   "/topics",
+  "/rounds",
 ];

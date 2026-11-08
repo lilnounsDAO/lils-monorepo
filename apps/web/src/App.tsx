@@ -20,6 +20,11 @@ import TopicsPage from './pages/TopicsPage'
 import VotePage from './pages/VotePage'
 import VoteDetailPage from './pages/VoteDetailPage'
 import DigestPage from './pages/DigestPage'
+import RoundsPage from './pages/RoundsPage'
+import RoundDetailPage from './pages/RoundDetailPage'
+import RoundProposalPage from './pages/RoundProposalPage'
+import RoundProposePage from './pages/RoundProposePage'
+import RoundCreatePage from './pages/RoundCreatePage'
 // import StatsPage from './pages/StatsPage'
 // import TreasuryStatsPage from './pages/TreasuryStatsPage'
 import SuccessPage from './pages/SuccessPage'
@@ -112,6 +117,11 @@ function App() {
               <Route path="vote/nounsdao/:id" element={<NounsDaoRedirect />} />
               <Route path="candidates" element={<CandidatePage />} />
               <Route path="candidates/:id" element={<CandidateDetailPage />} />
+              <Route path="rounds" element={<RoundsPage />} />
+              <Route path="rounds/new" element={<RoundCreatePage />} />
+              <Route path="rounds/:handle" element={<RoundDetailPage />} />
+              <Route path="rounds/:handle/propose" element={<RoundProposePage />} />
+              <Route path="rounds/:handle/proposals/:id" element={<RoundProposalPage />} />
               <Route path="topics" element={<TopicsPage />} />
               <Route path="topics/:id" element={<TopicDetailPage/>} />
               <Route path="profiles" element={<ProfilesPage />} />
