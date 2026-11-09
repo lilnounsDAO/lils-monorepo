@@ -22,11 +22,24 @@ type Filter = (typeof FILTERS)[number]["id"];
 function RoundsFeed({ filter }: { filter: Filter }) {
   const { debouncedSearchValue } = useSearchContext();
   const search = debouncedSearchValue.trim();
-  const { data, isLoading } = useRoundsList({
+  const { data, isLoading, isError, refetch } = useRoundsList({
     state: filter === "all" ? undefined : filter,
     search: search || undefined,
     limit: 50,
   });
+
+  // An unreachable service must not read as "no rounds yet": there are 18, and
+  // telling someone the history is empty is worse than admitting a fault.
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <p className="text-content-secondary">Rounds could not be loaded just now.</p>
+        <Button variant="secondary" onClick={() => refetch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
