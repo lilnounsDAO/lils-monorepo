@@ -79,7 +79,7 @@ export default function WalletDropdown({ disableMobileShrink }: WalletDropdownPr
             {(() => {
               if (!connected) {
                 return (
-                  <Button onClick={openConnectModal} variant="secondary" className="py-[10px]">
+                  <Button onClick={openConnectModal} variant="secondary" className="shrink-0 px-4 py-[10px] md:px-8">
                     Connect
                   </Button>
                 );
