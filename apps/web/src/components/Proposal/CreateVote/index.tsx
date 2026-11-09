@@ -30,7 +30,7 @@ import { EnsName } from "@/components/EnsName";
 import { getAddress, zeroAddress } from "viem";
 import { X } from "lucide-react";
 import { VoteValue } from "@/data/generated/ponder/graphql";
-import { HTMLAttributes, useEffect, useMemo, useState } from "react";
+import { HTMLAttributes, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { useSearchParams } from "react-router-dom";
 import { useReadNounsNftTokenGetPriorVotes } from "@/data/generated/wagmi";
@@ -247,8 +247,13 @@ function CreateVoteForm({
   }, [txnState]);
 
   // Reset things on success
+  // Only clear once per successful vote; re-running while state is still "success" loops renders (React #185)
+  const prevTxnState = useRef(txnState);
   useEffect(() => {
-    if (txnState == "success") {
+    const justSucceeded =
+      txnState == "success" && prevTxnState.current != "success";
+    prevTxnState.current = txnState;
+    if (justSucceeded) {
       txnReset();
       clearReplies();
       clearRevotes();

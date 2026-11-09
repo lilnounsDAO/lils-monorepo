@@ -220,12 +220,12 @@ export function useSendTransaction(): UseSendTransactionReturnType {
     ],
   );
 
-  function reset() {
+  const reset = useCallback(() => {
     setValidationError(null);
     setHash(undefined);
     setAwaitingSafe(false);
     resetSendTransaction();
-  }
+  }, [resetSendTransaction]);
 
   const error = useMemo(
     () =>
