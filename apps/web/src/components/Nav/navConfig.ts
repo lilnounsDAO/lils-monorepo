@@ -33,7 +33,7 @@ const ALL_DESKTOP_NAV_ITEMS: NavItem[] = [
 const ALL_MOBILE_NAV_ITEMS: NavItem[] = [
   { name: "Home", icon: "home", href: "/" },
   { name: "Explore", icon: "layers", href: "/explore" },
-  { name: "Governance", icon: "vote", href: "/vote" },
+  { name: "Governance", icon: "vote", href: "/digest" },
   { name: "Learn", icon: "book", href: "/learn" },
 ];
 

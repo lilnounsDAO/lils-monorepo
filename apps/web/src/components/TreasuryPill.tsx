@@ -34,7 +34,7 @@ export default function TreasuryPill() {
 
   if (isLoading) {
     return (
-      <Button variant="secondary" className="flex flex-row gap-2 px-4 py-[6px]">
+      <Button variant="secondary" className="flex shrink-0 flex-row gap-2 px-3 py-[6px] md:px-4">
         <span className="label-md">Treasury</span>
         <span className="label-md">...</span>
       </Button>
@@ -50,10 +50,10 @@ export default function TreasuryPill() {
       <TooltipTrigger asChild>
         <Button
           variant="secondary"
-          className="flex flex-row gap-2 px-4 py-[6px]"
+          className="flex shrink-0 flex-row gap-2 px-3 py-[6px] md:px-4"
           onClick={handleClick}
         >
-          <span className="label-md">Treasury</span>
+          <span className="label-md hidden sm:inline">Treasury</span>
           <span className="label-md flex items-center">
             Ξ
             <NumberFlow
@@ -66,7 +66,7 @@ export default function TreasuryPill() {
               }}
             />
           </span>
-          <span className="label-md">
+          <span className="label-md hidden sm:inline">
             +{data.totalNouns} Nouns
           </span>
         </Button>

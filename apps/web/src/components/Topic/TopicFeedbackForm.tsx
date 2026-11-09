@@ -28,7 +28,7 @@ import { EnsAvatar } from "../EnsAvatar";
 import { EnsName } from "../EnsName";
 import { getAddress } from "viem";
 import { X } from "lucide-react";
-import { HTMLAttributes, useEffect, useMemo, useState } from "react";
+import { HTMLAttributes, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { useReadContract } from "wagmi";
 import { nounsNftTokenConfig } from "@/data/generated/wagmi";
@@ -238,9 +238,13 @@ function CandidateFeedbackFormInner({
     return txnState === "pending-signature" || txnState === "pending-txn";
   }, [txnState]);
 
-  // Reset things on success
+  // Reset things once per success; re-running while state stays "success" loops renders (React #185)
+  const prevTxnState = useRef(txnState);
   useEffect(() => {
-    if (txnState == "success") {
+    const justSucceeded =
+      txnState == "success" && prevTxnState.current != "success";
+    prevTxnState.current = txnState;
+    if (justSucceeded) {
       clearReplies();
       clearRevotes();
       form.reset({
