@@ -7,7 +7,26 @@ import { useState, useEffect } from "react";
 import { useAddRecentTransaction } from "@rainbow-me/rainbowkit";
 import { CHAIN_CONFIG } from "@/config";
 import { encodeFunctionData } from "viem";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatTimeLeft } from "@/utils/format";
 import { estimateGas, getBytecode } from "viem/actions";
+
+/** "in 1d 6h 12m", or "now" on the last tick before the timelock is up. */
+function formatExecutableIn(eta: number, now: number): string {
+  const left = eta - now;
+  return left <= 0 ? "now" : `in ${formatTimeLeft(left)}`;
+}
+
+/** The moment the timelock is up, in the reader's own timezone. */
+function formatExecutableAt(eta: number): string {
+  return new Date(eta * 1000).toLocaleString(undefined, {
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
 
 /**
  * DAO Contract ABI for queue, execute, and cancel functions
@@ -149,8 +168,15 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
     currentBlockNumber && 
     currentBlockNumber <= proposal.objectionPeriodEndBlock;
 
-  // Check if execution ETA has passed (for queued proposals)
-  const currentTimestamp = Math.floor(Date.now() / 1000);
+  // Check if execution ETA has passed (for queued proposals). This ticks so the
+  // countdown moves and the Execute button appears on its own when the timelock
+  // is up, rather than on the next reload.
+  const [currentTimestamp, setCurrentTimestamp] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (proposal.state !== "queued") return;
+    const timer = setInterval(() => setCurrentTimestamp(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [proposal.state]);
   // Get execution ETA (prefer executionEtaTimestamp, fallback to executionETA string)
   const executionETA = proposal.executionEtaTimestamp || (proposal.executionETA ? parseInt(proposal.executionETA) : null);
   const executionEtaPassed = executionETA 
@@ -164,11 +190,17 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
   // 2. AND execution ETA exists
   // 3. AND execution ETA has passed
   const showExecuteButton = proposal.state === "queued" && executionETA !== null && executionEtaPassed;
+  // Queued but still inside the timelock delay. Without this the Execute button
+  // is simply absent and nothing says why, or until when.
+  const showExecuteWait =
+    proposal.state === "queued" && executionETA !== null && !executionEtaPassed;
   // Show cancel button only if:
-  // 1. Proposal is in a cancelable state: active, queued, or succeeded (but not executed)
+  // 1. Proposal is in a cancelable state: pending, updatable, active, queued, or succeeded (but not executed)
   // 2. AND (user is the proposer OR proposer lost voting power)
   // FOR NOUNS ONLY: Only show if connected wallet is the proposer
-  const isCancelableState = 
+  const isCancelableState =
+    proposal.state === "pending" ||
+    proposal.state === "updatable" ||
     proposal.state === "active" ||
     proposal.state === "queued" ||
     (proposal.state === "successful" && proposal.state !== "executed");
@@ -480,7 +512,7 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
     }
   }, [isFailed, receiptError]);
 
-  if (!showQueueButton && !showExecuteButton && !showCancelButton) {
+  if (!showQueueButton && !showExecuteButton && !showExecuteWait && !showCancelButton) {
     return null;
   }
 
@@ -514,6 +546,21 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
         >
           {isExecuteLoading ? "Processing..." : "Execute Proposal"}
         </Button>
+      )}
+      {showExecuteWait && (
+        <Tooltip delayDuration={200}>
+          <TooltipTrigger asChild>
+            <span tabIndex={0}>
+              <Button variant="positive" disabled>
+                Executable {formatExecutableIn(executionETA!, currentTimestamp)}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            The timelock holds a queued proposal until{" "}
+            {formatExecutableAt(executionETA!)}.
+          </TooltipContent>
+        </Tooltip>
       )}
       {showCancelButton && (
         <Button

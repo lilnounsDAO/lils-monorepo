@@ -70,10 +70,25 @@ const CONTRACT_METADATA: Record<string, ContractMetadata> = {
     description: "Nounders multisig wallet",
     identifier: "noundersMultisig",
   },
-  nounsPayer: {
-    name: "Nouns Payer",
-    description: "Nouns Payer contract",
-    identifier: "nounsPayer",
+  lilNounsPayer: {
+    name: "Lil Nouns Payer",
+    description: "Lil Nouns Payer contract (USDC payouts)",
+    identifier: "lilNounsPayer",
+  },
+  lilNounsTokenBuyer: {
+    name: "Lil Nouns Token Buyer",
+    description: "Lil Nouns TokenBuyer contract (swaps ETH for USDC into the Payer)",
+    identifier: "lilNounsTokenBuyer",
+  },
+  nounsDaoPayer: {
+    name: "Nouns DAO Payer",
+    description: "Nouns DAO Payer contract",
+    identifier: "nounsDaoPayer",
+  },
+  nounsDaoTokenBuyer: {
+    name: "Nouns DAO Token Buyer",
+    description: "Nouns DAO TokenBuyer contract",
+    identifier: "nounsDaoTokenBuyer",
   },
   
   // Sepolia-specific contracts

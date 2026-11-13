@@ -12,7 +12,7 @@ import { CHAIN_CONFIG } from "@/config";
 import { nounsDaoLogicConfig, nounsNftTokenConfig } from "@/data/generated/wagmi";
 import { nounsDoaLogicAbi } from "@/abis/nounsDoaLogic";
 import type { Action } from "@/types/proposal-editor";
-import { resolveActions } from "@/utils/transactions";
+import { resolveActions, normalizeCalldata } from "@/utils/transactions";
 import { useEnsResolution } from "@/hooks/useEnsResolution";
 
 interface UseCreateProposalReturnType
@@ -149,7 +149,7 @@ export function useCreateProposal(): UseCreateProposalReturnType {
       const targets = transactions.map(tx => tx.target) as Hex[];
       const values = transactions.map((tx) => BigInt(tx.value));
       const signatures = transactions.map((tx) => tx.signature);
-      const calldatas = transactions.map((tx) => tx.calldata as Hex);
+      const calldatas = transactions.map((tx) => normalizeCalldata(tx.signature, tx.calldata) as Hex);
 
       // Combine title and description
       // Check if description already starts with the title as a heading to avoid duplication

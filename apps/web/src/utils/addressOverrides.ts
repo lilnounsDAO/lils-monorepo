@@ -1,4 +1,4 @@
-import { Address, getAddress } from "viem";
+import { Address, getAddress, zeroAddress } from "viem";
 import { CHAIN_CONFIG } from "@/config";
 
 export interface AddressOverride {
@@ -23,7 +23,8 @@ function initializeAddressOverrides() {
     const treasury = getAddress(CHAIN_CONFIG.addresses.nounsTreasury);
     const auctionHouse = getAddress(CHAIN_CONFIG.addresses.lilVRGDAProxy);
     const nounsToken = getAddress(CHAIN_CONFIG.addresses.nounsToken);
-    const nounsPayer = getAddress(CHAIN_CONFIG.addresses.nounsPayer);
+    const lilNounsPayer = getAddress(CHAIN_CONFIG.addresses.lilNounsPayer);
+    const nounsDaoPayer = getAddress(CHAIN_CONFIG.addresses.nounsDaoPayer);
 
     ADDRESS_OVERRIDES = {
       [treasury.toLowerCase()]: {
@@ -38,11 +39,17 @@ function initializeAddressOverrides() {
         name: "Nouns NFT",
         avatar: "/nouns-treasury.png",
       },
-      [nounsPayer.toLowerCase()]: {
-        name: "Nouns Payer",
+      [lilNounsPayer.toLowerCase()]: {
+        name: "Lil Nouns Payer",
+        avatar: "/nouns-treasury.png",
+      },
+      [nounsDaoPayer.toLowerCase()]: {
+        name: "Nouns DAO Payer",
         avatar: "/nouns-treasury.png",
       },
     };
+    // Payer slots are zero on chains without a deployment
+    delete ADDRESS_OVERRIDES[zeroAddress];
   } catch (error) {
     // If CHAIN_CONFIG is not available yet, initialize empty
     ADDRESS_OVERRIDES = {};

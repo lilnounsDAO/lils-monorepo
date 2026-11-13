@@ -53,7 +53,8 @@ import { CHAIN_CONFIG } from "@/config";
 import { getDelegates, Delegate } from '@/data/snapshot/getDelegates'
 import { SnapshotVote as SnapshotVoteType } from '@/data/snapshot/getSnapshotProposals'
 import { useFilterContext } from '@/components/Filter'
-import { Pencil, RefreshCw, History } from 'lucide-react'
+import { Pencil, RefreshCw, History, Copy } from 'lucide-react'
+import { ClipboardCopy } from '@/components/ClipboardCopy'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useProposalVersions } from '@/hooks/useProposalVersions'
@@ -73,6 +74,17 @@ function parseVoteDirection(reason: string | null): number {
 // Helper function to extract voter address from vote ID
 function extractVoterAddress(voteId: string): string {
   return voteId.split('-')[0] as `0x${string}`
+}
+
+/** Largest unit only, e.g. "2 days", "3 hrs", "45 min". */
+function formatVoteCountdown(seconds: number): string {
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor(seconds / 3_600)
+  const mins = Math.floor(seconds / 60)
+  if (days > 0) return `${days} ${days === 1 ? 'day' : 'days'}`
+  if (hours > 0) return `${hours} ${hours === 1 ? 'hr' : 'hrs'}`
+  if (mins > 0) return `${mins} min`
+  return 'less than a minute'
 }
 
 const VOTE_FILTER_ITEMS: { name: string; value: string }[] = [
@@ -664,8 +676,19 @@ Wylin is an artist and entrepreneur. After exhibiting in galleries, he dropped o
   }
 
   const nowTimestamp = Math.floor(Date.now() / 1000)
+  const startTimeDelta = Math.max(finalProposal.votingStartTimestamp - nowTimestamp, 0)
   const endTimeDelta = Math.max(finalProposal.votingEndTimestamp - nowTimestamp, 0)
   const timeToVotingEndFormatted = formatTimeLeft(endTimeDelta, true)
+  const pendingTooltip =
+    startTimeDelta > 0 ? `Active in ${formatVoteCountdown(startTimeDelta)}` : 'Active soon'
+  const endingTooltip =
+    endTimeDelta > 0 ? `Ends in ${formatVoteCountdown(endTimeDelta)}` : 'Ending soon'
+  const statusTooltip =
+    finalProposal.state === 'pending'
+      ? pendingTooltip
+      : finalProposal.state === 'active'
+        ? endingTooltip
+        : null
   
   // Format exact end time
   const endDate = new Date(finalProposal.votingEndTimestamp * 1000)
@@ -732,6 +755,19 @@ Wylin is an artist and entrepreneur. After exhibiting in galleries, he dropped o
             )}
           </div>
           <div className="flex items-center gap-2">
+            {/* The description usually opens with "# Title"; add it when it doesn't */}
+            <ClipboardCopy
+              copyContent={
+                finalProposal.description.trimStart().startsWith('# ')
+                  ? finalProposal.description
+                  : `# ${finalProposal.title}\n\n${finalProposal.description}`
+              }
+            >
+              <Button variant="ghost" className="flex items-center gap-2">
+                <Copy size={16} />
+                Copy Markdown
+              </Button>
+            </ClipboardCopy>
             {hasMultipleVersions && (
               <Button
                 variant="ghost"
@@ -765,11 +801,27 @@ Wylin is an artist and entrepreneur. After exhibiting in galleries, he dropped o
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
+                  <p>{endingTooltip}</p>
                   <p>Ends at {endTimeFormatted}</p>
                 </TooltipContent>
               </Tooltip>
             )}
-            {showNounsBadge && <ProposalStateBadge state={finalProposal.state} objectionPeriodEndBlock={finalProposal.objectionPeriodEndBlock} />}
+            {showNounsBadge && (
+              statusTooltip ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="cursor-help">
+                      <ProposalStateBadge state={finalProposal.state} objectionPeriodEndBlock={finalProposal.objectionPeriodEndBlock} />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{statusTooltip}</p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <ProposalStateBadge state={finalProposal.state} objectionPeriodEndBlock={finalProposal.objectionPeriodEndBlock} />
+              )
+            )}
             {showLilNounsBadge && (
             <MetagovStatusBadge 
                 state="metagov_active" 

@@ -1,13 +1,19 @@
-import { getLogs } from 'viem/actions'
 import { CHAIN_CONFIG } from '@/config'
+import { getLogsChunked } from '@/utils/getLogsChunked'
+import { hasDaoDataContract } from '@/utils/daoVersion'
 import { nounsDaoDataConfig } from '../nounsDaoDataContract'
 import { ProposalIdea, IdeaVersion, SponsorSignature } from '../goldsky/governance/ideaTypes'
 import { decodeEventLog } from 'viem'
 
 // Query ProposalCandidateCreated events to get all candidates
 export async function getProposalCandidates(): Promise<ProposalIdea[]> {
+  // No distinct NounsDAOData contract means no candidate events to find.
+  if (!hasDaoDataContract()) {
+    return []
+  }
+
   try {
-    const logs = await getLogs(CHAIN_CONFIG.publicClient, {
+    const logs = await getLogsChunked(CHAIN_CONFIG.publicClient, {
       address: nounsDaoDataConfig.address,
       event: {
         type: 'event',
@@ -25,8 +31,6 @@ export async function getProposalCandidates(): Promise<ProposalIdea[]> {
           ]},
         ],
       },
-      fromBlock: 'earliest',
-      toBlock: 'latest',
     })
 
     // Convert logs to ideas
@@ -146,7 +150,7 @@ async function getCandidateFeedback(
   slug: string
 ): Promise<any[]> {
   try {
-    const logs = await getLogs(CHAIN_CONFIG.publicClient, {
+    const logs = await getLogsChunked(CHAIN_CONFIG.publicClient, {
       address: nounsDaoDataConfig.address,
       event: {
         type: 'event',
@@ -162,8 +166,6 @@ async function getCandidateFeedback(
       args: {
         proposer: proposer as `0x${string}`,
       },
-      fromBlock: 'earliest',
-      toBlock: 'latest',
     })
 
     // Filter logs by slug and convert to feedback format

@@ -10,7 +10,7 @@ import {
 } from "./useSendTransaction";
 import { CustomTransactionValidationError } from "./types";
 import { Action } from "@/types/proposal-editor";
-import { resolveActions } from "@/utils/transactions";
+import { resolveActions, normalizeCalldata } from "@/utils/transactions";
 import { ProposalIdea } from "@/data/goldsky/governance/ideaTypes";
 import { extractSlugFromId } from "@/data/goldsky/governance/getProposalIdeas";
 import { useEnsResolution } from "@/hooks/useEnsResolution";
@@ -74,7 +74,7 @@ export function useUpdateProposalCandidate(): UseUpdateProposalCandidateReturnTy
       const targets = transactions.map((tx) => getAddress(tx.target));
       const values = transactions.map((tx) => BigInt(tx.value));
       const signatures = transactions.map((tx) => tx.signature);
-      const calldatas = transactions.map((tx) => tx.calldata as Hex);
+      const calldatas = transactions.map((tx) => normalizeCalldata(tx.signature, tx.calldata) as Hex);
 
       // Combine title and description
       const fullDescription = `# ${title}\n\n${description}`;
