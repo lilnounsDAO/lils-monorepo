@@ -39,8 +39,11 @@ export interface ChainSpecificData {
     wrappedNativeToken: Address;
     noundersMultisig: Address;
     usdc: Address;
-    nounsPayer: Address;
-    nounsTokenBuyer: Address;
+    lilNounsPayer: Address;
+    lilNounsTokenBuyer: Address;
+    // Nouns DAO's own Payer / TokenBuyer, kept so proposals that target them still decode
+    nounsDaoPayer: Address;
+    nounsDaoTokenBuyer: Address;
     stEth: Address;
     [key: string]: Address; // Allow additional addresses like nounsSeeder, lilVRGDA, etc.
   };
@@ -143,8 +146,10 @@ const _NOUNSDAO_CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
         "0x2573C60a6D127755aA2DC85e342F7da2378a0Cc5",
       ),
       usdc: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-      nounsPayer: getAddress("0xd97Bcd9f47cEe35c0a9ec1dc40C1269afc9E8E1D"),
-      nounsTokenBuyer: getAddress("0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
+      lilNounsPayer: getAddress("0x0000000000000000000000000000000000000000"),
+      lilNounsTokenBuyer: getAddress("0x0000000000000000000000000000000000000000"),
+      nounsDaoPayer: getAddress("0xd97Bcd9f47cEe35c0a9ec1dc40C1269afc9E8E1D"),
+      nounsDaoTokenBuyer: getAddress("0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
       stEth: getAddress("0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"),
     },
     nounsGovernanceUrl: "https://lilnouns.wtf/",
@@ -218,8 +223,10 @@ const _NOUNSDAO_CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
 
       // Multisig & Payer
       noundersMultisig: getAddress("0x0000000000000000000000000000000000000000"),
-      nounsPayer: getAddress("0xd97Bcd9f47cEe35c0a9ec1dc40C1269afc9E8E1D"),
-      nounsTokenBuyer: getAddress("0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
+      lilNounsPayer: getAddress("0x0000000000000000000000000000000000000000"), // not deployed on Sepolia
+      lilNounsTokenBuyer: getAddress("0x0000000000000000000000000000000000000000"),
+      nounsDaoPayer: getAddress("0x0000000000000000000000000000000000000000"),
+      nounsDaoTokenBuyer: getAddress("0x0000000000000000000000000000000000000000"),
     },
     nounsGovernanceUrl: "https://sepolia.lilnouns.wtf/",
     subgraphUrl: {
@@ -278,8 +285,10 @@ export const CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
       ),
       nounsDAOTreasury: getAddress("0xb1a32FC9F9D8b2cf86C068Cae13108809547ef71"), // Nouns DAO executor — receives DAO reward nouns (1, 11, 21...)
       usdc: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-      nounsPayer: getAddress("0xd97Bcd9f47cEe35c0a9ec1dc40C1269afc9E8E1D"),
-      nounsTokenBuyer: getAddress("0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
+      lilNounsPayer: getAddress("0xF62387d21153fdcbB06Ab3026c2089e418688164"),
+      lilNounsTokenBuyer: getAddress("0x387140cD0132ff750263f08aCfdFbEc7b0Cf63c0"),
+      nounsDaoPayer: getAddress("0xd97Bcd9f47cEe35c0a9ec1dc40C1269afc9E8E1D"),
+      nounsDaoTokenBuyer: getAddress("0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
       stEth: getAddress("0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"),
     },
     nounsGovernanceUrl: "https://lilnouns.wtf/",
@@ -351,8 +360,10 @@ export const CHAIN_SPECIFIC_CONFIGS: Record<number, ChainSpecificData> = {
       usdc: getAddress(sepoliaAddresses.usdc),
       stEth: getAddress(sepoliaAddresses.stEth),
 
-      nounsPayer: getAddress(sepoliaAddresses.nounsPayer),
-      nounsTokenBuyer: getAddress(sepoliaAddresses.nounsTokenBuyer || "0x4f2acdc74f6941390d9b1804fabc3e780388cfe5"),
+      lilNounsPayer: getAddress(sepoliaAddresses.lilNounsPayer),
+      lilNounsTokenBuyer: getAddress(sepoliaAddresses.lilNounsTokenBuyer),
+      nounsDaoPayer: getAddress(sepoliaAddresses.nounsDaoPayer),
+      nounsDaoTokenBuyer: getAddress(sepoliaAddresses.nounsDaoTokenBuyer),
       noundersMultisig: getAddress(sepoliaAddresses.noundersMultisig),
       nounsDAOTreasury: getAddress("0x0000000000000000000000000000000000000000"), // No Nouns DAO treasury on Sepolia
     },

@@ -26,6 +26,7 @@ import Icon from "@/components/ui/Icon";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { isDaoVersion5 } from "@/utils/daoVersion";
 import { RefundBalanceNotice } from "@/components/RefundBalanceNotice";
+import { VoteBar } from "@/components/VoteBar";
 
 export type DigestTab =
   | "digest"
@@ -54,13 +55,22 @@ function longDate(timestamp: number): string {
   });
 }
 
-// "Starts in 17 hours", "Ends in 2 days", "Voting ended 5 hours ago" / "October 24".
+// "Starts in 17 hours", "Ends in 2 days", "Executable in 6 hours",
+// "Voting ended 5 hours ago" / "October 24".
 function timeLabel(proposal: ProposalOverview): string {
   const now = Math.floor(Date.now() / 1000);
   if (proposal.state === "cancelled") return "Canceled";
   if (proposal.state === "vetoed") return "Vetoed";
   if (proposal.state === "pending" || proposal.state === "updatable") {
     return `Starts in ${relative(proposal.votingStartTimestamp - now)}`;
+  }
+  // A queued proposal is waiting on the timelock, not on the vote that already
+  // finished, so say when it can actually run.
+  if (proposal.state === "queued" && proposal.executionEtaTimestamp) {
+    const eta = proposal.executionEtaTimestamp;
+    return eta > now
+      ? `Executable in ${relative(eta - now)}`
+      : `Executable since ${longDate(eta)}`;
   }
   if (proposal.votingEndTimestamp > now) {
     return `Ends in ${relative(proposal.votingEndTimestamp - now)}`;
@@ -115,39 +125,6 @@ function StateBadge({ state }: { state: ProposalState }) {
   );
 }
 
-// For from the left, against from the right (abstain beside it), quorum tick.
-function VoteBar({ proposal }: { proposal: ProposalOverview }) {
-  const { forVotes, againstVotes, abstainVotes, quorumVotes } = proposal;
-  const total = Math.max(
-    quorumVotes * 1.1,
-    forVotes + againstVotes + abstainVotes,
-    1,
-  );
-  const pct = (value: number) => `${(value / total) * 100}%`;
-  return (
-    <div className="relative h-[3px] w-full rounded-full bg-gray-100">
-      <div
-        className="absolute inset-y-0 left-0 rounded-full bg-semantic-positive"
-        style={{ width: pct(forVotes) }}
-      />
-      <div
-        className="absolute inset-y-0 rounded-full bg-gray-400"
-        style={{ right: pct(againstVotes), width: pct(abstainVotes) }}
-      />
-      <div
-        className="absolute inset-y-0 right-0 rounded-full bg-semantic-negative"
-        style={{ width: pct(againstVotes) }}
-      />
-      {quorumVotes > 0 && (
-        <div
-          className="absolute -top-[3px] h-[9px] w-[3px] rounded-full bg-semantic-warning"
-          style={{ left: pct(quorumVotes) }}
-        />
-      )}
-    </div>
-  );
-}
-
 function VoteChips({ proposal }: { proposal: ProposalOverview }) {
   return (
     <span className="flex items-center gap-px overflow-hidden rounded-[6px] text-xs text-content-secondary">
@@ -181,7 +158,7 @@ function SidebarProposalRow({ proposal }: { proposal: ProposalOverview }) {
       <p className="text-base font-bold leading-snug text-content-primary line-clamp-2">
         {proposal.title}
       </p>
-      {!upcoming && hasVotes && <VoteBar proposal={proposal} />}
+      {!upcoming && hasVotes && <VoteBar {...proposal} />}
       <div className="flex flex-wrap items-center gap-2 text-sm text-content-secondary">
         <StateBadge state={proposal.state} />
         {!upcoming && <VoteChips proposal={proposal} />}

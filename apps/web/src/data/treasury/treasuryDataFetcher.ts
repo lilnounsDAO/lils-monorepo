@@ -1,4 +1,4 @@
-import { Address, formatUnits, getAddress } from "viem";
+import { Address, formatUnits, getAddress, isAddressEqual, zeroAddress } from "viem";
 import { readContract } from "viem/actions";
 import { getContractsForChain } from "@/contracts/proposal-contracts";
 import { CHAIN_SPECIFIC_CONFIGS } from "@/config";
@@ -87,6 +87,7 @@ async function getEthBalance(
   publicClient: any,
   address: Address
 ): Promise<bigint> {
+  if (isAddressEqual(address, zeroAddress)) return 0n;
   return await publicClient.getBalance({ address });
 }
 
@@ -98,6 +99,7 @@ async function getTokenBalance(
   tokenAddress: Address,
   accountAddress: Address
 ): Promise<TokenBalance> {
+  if (isAddressEqual(accountAddress, zeroAddress)) return { balance: 0n, decimals: 18 };
   try {
     // Normalize to EIP-55 checksum so viem accepts the address
     const token = getAddress(tokenAddress);

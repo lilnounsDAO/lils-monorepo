@@ -10,7 +10,7 @@ import SearchProvider, { SearchInput, useSearchContext } from '@/components/Sear
 import { ProposalOverview } from '@/data/goldsky/governance/common'
 import { ProposalIdea } from '@/data/goldsky/governance/ideaTypes'
 import { Topic } from '@/data/goldsky/governance/getTopics'
-import { getProposalsForAddress, getCandidatesForAddress, getTopicsForAddress, getSponsoredProposalsForAddress } from '@/data/goldsky/governance/getUserProposals'
+import { getProposalsForAddress, getCandidatesForAddress, getTopicsForAddress, getSponsoredProposalsForAddress, getVotedProposalsForAddress, type ProfileVote } from '@/data/goldsky/governance/getUserProposals'
 import { isDaoVersion5 } from '@/utils/daoVersion'
 import { useCollection } from '@/hooks/useDrafts'
 import { Draft } from '@/types/proposal-editor'
@@ -30,7 +30,8 @@ import Icon from '@/components/ui/Icon'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { EnsName } from '@/components/EnsName'
 import { EnsAvatar } from '@/components/EnsAvatar'
-import { getNounsForAddress, getNounsDelegatedTo } from '@/data/ponder/nouns'
+import { VoteBody } from '@/components/Digest/DigestFeedItem'
+import { getNounsForAddress, getNounsDelegatedTo, type PonderNoun } from '@/data/ponder/nouns'
 import { transformPonderNounToNoun } from '@/data/noun/helpers'
 import { Noun } from '@/data/noun/types'
 import DelegationDialog from '@/components/dialog/DelegationDialog'
@@ -42,15 +43,59 @@ import { useEnsAddress, useEnsResolver } from 'wagmi'
 import WalletButton from '@/components/WalletButton'
 import UserTokensExplorer from '@/components/UserTokensExplorer'
 
+const NOUNS_PAGE_SIZE = 1000
+
+// The indexer pages results, so keep fetching until there are no more
+async function fetchAllNouns(
+  fetchPage: (address: string, limit: number, offset: number) => Promise<{ nouns: PonderNoun[]; hasMore: boolean }>,
+  address: string
+) {
+  const all: PonderNoun[] = []
+  for (let offset = 0; ; offset += NOUNS_PAGE_SIZE) {
+    const page = await fetchPage(address, NOUNS_PAGE_SIZE, offset)
+    all.push(...page.nouns)
+    if (!page.hasMore || page.nouns.length === 0) return all
+  }
+}
+
 interface ProfileProps {
   address?: string
 }
 
 type UnifiedItem = 
-  | { type: 'proposal'; data: ProposalOverview }
+  | { type: 'proposal'; data: ProposalOverview; proposed: boolean; vote?: ProfileVote }
   | { type: 'candidate'; data: ProposalIdea }
   | { type: 'topic'; data: Topic }
   | { type: 'draft'; data: Draft }
+
+const VOTE_LABEL: Record<ProfileVote['support'], { label: string; className: string }> = {
+  1: { label: 'For', className: 'bg-green-100 text-semantic-positive' },
+  0: { label: 'Against', className: 'bg-red-100 text-semantic-negative' },
+  2: { label: 'Abstain', className: 'bg-gray-100 text-content-secondary' },
+}
+
+// The profile's vote on a proposal; long reasons are clamped and expand while the card is hovered
+function ProfileVoteSummary({ vote }: { vote: ProfileVote }) {
+  const meta = VOTE_LABEL[vote.support]
+  return (
+    <div className="flex flex-col gap-1.5 rounded-[10px] bg-gray-50 px-3 py-2 text-sm">
+      <span className="flex items-center gap-2">
+        <span className={clsx('rounded-[6px] px-2 py-0.5 text-xs font-semibold uppercase tracking-wide', meta.className)}>
+          Voted {meta.label}
+        </span>
+        <span className="text-content-secondary">
+          {vote.votes} vote{vote.votes === 1 ? '' : 's'}
+        </span>
+      </span>
+      {(vote.reason || vote.replies.length > 0 || vote.revotes.length > 0) && (
+        // Clamped like the digest feed's bodies; grows while the card is hovered
+        <div className="relative max-h-[4.5rem] overflow-hidden text-content-primary group-hover:max-h-60 group-hover:overflow-y-auto [&_p:first-child]:mt-0">
+          <VoteBody event={{ ...vote, reason: vote.reason ?? undefined }} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 function UnifiedItemCard({ item, address }: { item: UnifiedItem; address: string }) {
   const seed = getNounSeedFromAddress(address as `0x${string}`)
@@ -106,6 +151,7 @@ function UnifiedItemCard({ item, address }: { item: UnifiedItem; address: string
                 <ProposalStateBadge state={proposal.state} />
               </div>
             </div>
+            {item.vote && <ProfileVoteSummary vote={item.vote} />}
           </div>
         </div>
       </Link>
@@ -239,6 +285,61 @@ function UnifiedItemCard({ item, address }: { item: UnifiedItem; address: string
   return null
 }
 
+export type ItemFilter = 'all' | 'proposed' | 'voted' | 'candidates' | 'topics'
+
+const ITEM_FILTERS: { value: ItemFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'proposed', label: 'Props made' },
+  { value: 'voted', label: 'Voted on' },
+  { value: 'candidates', label: 'Candidates' },
+  { value: 'topics', label: 'Topics' },
+]
+
+export function matchesItemFilter(item: UnifiedItem, filter: ItemFilter) {
+  switch (filter) {
+    case 'proposed':
+      return item.type === 'proposal' && item.proposed
+    case 'voted':
+      return item.type === 'proposal' && !!item.vote
+    case 'candidates':
+      return item.type === 'candidate'
+    case 'topics':
+      return item.type === 'topic'
+    default:
+      return true
+  }
+}
+
+function ItemFilterChips({
+  value,
+  onChange,
+  counts,
+}: {
+  value: ItemFilter
+  onChange: (filter: ItemFilter) => void
+  counts: Record<ItemFilter, number>
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {ITEM_FILTERS.filter((f) => f.value === 'all' || counts[f.value] > 0).map((f) => (
+        <button
+          key={f.value}
+          type="button"
+          onClick={() => onChange(f.value)}
+          className={clsx(
+            'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+            value === f.value
+              ? 'bg-content-primary text-white'
+              : 'bg-background-secondary text-content-secondary hover:bg-gray-200'
+          )}
+        >
+          {f.label} <span className="opacity-60">{counts[f.value]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function FilteredUnifiedItems({ items, address, isOwnProfile }: { items: UnifiedItem[]; address: string; isOwnProfile: boolean }) {
   const { debouncedSearchValue } = useSearchContext()
   
@@ -304,12 +405,24 @@ function TokensCard({
   isLoading 
 }: { 
   address: string
-  ownedNouns: Noun[]
-  delegatedNouns: Noun[]
+  ownedNouns: Omit<Noun, 'secondaryListing'>[]
+  delegatedNouns: Omit<Noun, 'secondaryListing'>[]
   isLoading: boolean
 }) {
   const totalOwned = ownedNouns.length
   const totalDelegated = delegatedNouns.length
+  const [showAllDelegators, setShowAllDelegators] = useState(false)
+
+  // Owners who delegated their lils here, biggest first (their own self-delegation excluded)
+  const delegators = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const noun of delegatedNouns) {
+      if (noun.owner.toLowerCase() === address.toLowerCase()) continue
+      counts.set(noun.owner, (counts.get(noun.owner) ?? 0) + 1)
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])
+  }, [delegatedNouns, address])
+  const selfDelegated = delegatedNouns.length - delegators.reduce((sum, [, n]) => sum + n, 0)
   
   // Get one featured noun (first owned, or first delegated if no owned)
   const featuredNoun = ownedNouns[0] || delegatedNouns[0]
@@ -356,6 +469,37 @@ function TokensCard({
             </div>
           </div>
           
+          {delegators.length > 0 && (
+            <div className="flex flex-col gap-2 border-t pt-4">
+              <span className="text-sm text-content-secondary">
+                Delegated by {delegators.length} wallet{delegators.length === 1 ? '' : 's'}
+                {selfDelegated > 0 && ` · ${selfDelegated} self`}
+              </span>
+              <div className="flex max-h-[320px] flex-col gap-1 overflow-y-auto">
+                {(showAllDelegators ? delegators : delegators.slice(0, 5)).map(([owner, count]) => (
+                  <Link
+                    key={owner}
+                    to={`/profile/${owner}`}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-gray-50"
+                  >
+                    <EnsAvatar address={owner as `0x${string}`} size={20} />
+                    <EnsName address={owner as `0x${string}`} className="min-w-0 flex-1 truncate font-medium" />
+                    <span className="font-bold">{count}</span>
+                  </Link>
+                ))}
+              </div>
+              {delegators.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllDelegators((v) => !v)}
+                  className="self-start text-sm text-semantic-accent hover:text-semantic-accent-dark"
+                >
+                  {showAllDelegators ? 'Show less' : `Show all ${delegators.length}`}
+                </button>
+              )}
+            </div>
+          )}
+
           {(totalOwned > 0 || totalDelegated > 0) && (
             <Link
               to={`/profile/${address}?owner=${address}`}
@@ -545,12 +689,8 @@ export function Profile({ address: addressProp }: ProfileProps) {
   const { data: ownedNounsData, isLoading: isLoadingOwned } = useQuery({
     queryKey: ['nouns-owned', resolvedAddress],
     queryFn: async () => {
-      if (!resolvedAddress) return { nouns: [], hasMore: false }
-      const result = await getNounsForAddress(resolvedAddress, 100, 0)
-      return {
-        nouns: result.nouns.map(transformPonderNounToNoun),
-        hasMore: result.hasMore
-      }
+      if (!resolvedAddress) return { nouns: [] }
+      return { nouns: (await fetchAllNouns(getNounsForAddress, resolvedAddress)).map(transformPonderNounToNoun) }
     },
     enabled: !!resolvedAddress,
   })
@@ -558,12 +698,8 @@ export function Profile({ address: addressProp }: ProfileProps) {
   const { data: delegatedNounsData, isLoading: isLoadingDelegated } = useQuery({
     queryKey: ['nouns-delegated', resolvedAddress],
     queryFn: async () => {
-      if (!resolvedAddress) return { nouns: [], hasMore: false }
-      const result = await getNounsDelegatedTo(resolvedAddress, 100, 0)
-      return {
-        nouns: result.nouns.map(transformPonderNounToNoun),
-        hasMore: result.hasMore
-      }
+      if (!resolvedAddress) return { nouns: [] }
+      return { nouns: (await fetchAllNouns(getNounsDelegatedTo, resolvedAddress)).map(transformPonderNounToNoun) }
     },
     enabled: !!resolvedAddress,
   })
@@ -581,6 +717,14 @@ export function Profile({ address: addressProp }: ProfileProps) {
     enabled: !!resolvedAddress,
   })
   
+  const { data: voted = { proposals: [], votes: {} as Record<string, ProfileVote> }, isLoading: isLoadingVoted } = useQuery({
+    queryKey: ['user-voted-proposals', resolvedAddress, daoType],
+    queryFn: () => getVotedProposalsForAddress(resolvedAddress as `0x${string}`, daoType),
+    enabled: !!resolvedAddress,
+  })
+
+  const [itemFilter, setItemFilter] = useState<ItemFilter>('all')
+
   const isVersion5 = isDaoVersion5()
   
   const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
@@ -601,15 +745,21 @@ export function Profile({ address: addressProp }: ProfileProps) {
     enabled: !!resolvedAddress && isVersion5, // Only fetch if DAO version is 5
   })
   
-  const isLoading = isLoadingProposals || isLoadingCandidates || isLoadingTopics || isLoadingSponsored
+  const isLoading = isLoadingProposals || isLoadingCandidates || isLoadingTopics || isLoadingSponsored || isLoadingVoted
   
   // Combine all items into unified list
   const unifiedItems = useMemo<UnifiedItem[]>(() => {
     const items: UnifiedItem[] = []
     
-    // Add proposals
+    // Add proposals they made, then ones they only voted on
+    const proposedIds = new Set(proposals.map(p => p.id))
     proposals.forEach(proposal => {
-      items.push({ type: 'proposal', data: proposal })
+      items.push({ type: 'proposal', data: proposal, proposed: true, vote: voted.votes[proposal.id] })
+    })
+    voted.proposals.forEach(proposal => {
+      if (!proposedIds.has(proposal.id)) {
+        items.push({ type: 'proposal', data: proposal, proposed: false, vote: voted.votes[proposal.id] })
+      }
     })
     
     // Add candidates
@@ -648,7 +798,7 @@ export function Profile({ address: addressProp }: ProfileProps) {
       }
       return getTimestamp(b) - getTimestamp(a)
     })
-  }, [proposals, candidates, sponsored.candidates, topics, drafts, connectedAddress, resolvedAddress])
+  }, [proposals, voted, candidates, sponsored.candidates, topics, drafts, connectedAddress, resolvedAddress])
   
   // Categorize items
   const { activeItems, draftItems, pastItems } = useMemo(() => {
@@ -657,6 +807,7 @@ export function Profile({ address: addressProp }: ProfileProps) {
     const past: UnifiedItem[] = []
     
     unifiedItems.forEach(item => {
+      if (!matchesItemFilter(item, itemFilter)) return
       if (item.type === 'draft') {
         drafts.push(item)
       } else if (item.type === 'proposal') {
@@ -686,6 +837,14 @@ export function Profile({ address: addressProp }: ProfileProps) {
       draftItems: drafts,
       pastItems: past,
     }
+  }, [unifiedItems, itemFilter])
+
+  const itemCounts = useMemo(() => {
+    const counts = {} as Record<ItemFilter, number>
+    for (const f of ITEM_FILTERS) {
+      counts[f.value] = unifiedItems.filter(item => item.type !== 'draft' && matchesItemFilter(item, f.value)).length
+    }
+    return counts
   }, [unifiedItems])
   
   // Show loading state while resolving ENS
@@ -761,8 +920,8 @@ export function Profile({ address: addressProp }: ProfileProps) {
                   </h1>
                   <p className="text-content-secondary">
                     {isOwnProfile 
-                      ? 'All proposals, topics, candidates, and drafts created or sponsored by your wallet'
-                      : `All proposals, topics, and candidates created or sponsored by this wallet`}
+                      ? 'Proposals, topics, candidates, and drafts you created, sponsored or voted on'
+                      : `Proposals, topics, and candidates this wallet created, sponsored or voted on`}
                   </p>
                 </div>
               </div>
@@ -811,6 +970,10 @@ export function Profile({ address: addressProp }: ProfileProps) {
               </div>
             </div>
             
+            {!showTokensView && !isLoading && (
+              <ItemFilterChips value={itemFilter} onChange={setItemFilter} counts={itemCounts} />
+            )}
+
             {showTokensView && resolvedOwnerAddress ? (
               // Show tokens explorer when owner param is present
               <div className="flex flex-col gap-4">
@@ -879,6 +1042,12 @@ export function Profile({ address: addressProp }: ProfileProps) {
                   </div>
                 )}
                 
+                {unifiedItems.length > 0 && activeItems.length + pastItems.length + (isOwnProfile ? draftItems.length : 0) === 0 && (
+                  <div className="flex h-[85px] w-full items-center justify-center rounded-[16px] border bg-gray-100 p-4 text-center">
+                    Nothing here for this filter
+                  </div>
+                )}
+
                 {unifiedItems.length === 0 && (
                   <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border-4 py-24 text-center">
                     <h4 className="text-content-primary">

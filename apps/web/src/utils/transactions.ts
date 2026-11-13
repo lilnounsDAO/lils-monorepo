@@ -1,7 +1,9 @@
-import type { Action } from '@/types/proposal-editor'
-import { parseEther, parseUnits, encodeFunctionData, getAddress, decodeAbiParameters, parseAbi, formatEther, formatUnits } from 'viem'
+import type { Action, OneTimePaymentAction } from '@/types/proposal-editor'
+import { parseEther, parseUnits, encodeFunctionData, encodeAbiParameters, parseAbiParameters, getAddress, decodeAbiParameters, parseAbi, formatEther, formatUnits, toFunctionSelector } from 'viem'
 import { contracts, getContractsForChain } from '@/contracts/proposal-contracts'
 import { Address } from 'viem'
+import { CHAIN_CONFIG, CHAIN_SPECIFIC_CONFIGS } from '@/config'
+import { predictStreamAddress, STREAM_FACTORY } from '@/utils/streams'
 
 export interface Transaction {
   target: string
@@ -11,11 +13,63 @@ export interface Transaction {
 }
 
 /**
- * Get DAO executor address based on chain ID
+ * The treasury a proposal actually executes from. This is the live DAO's
+ * timelock in CHAIN_SPECIFIC_CONFIGS, not the executor in proposal-contracts.ts
+ * — that one belongs to the older DAO and holds different assets, so simulating
+ * as it reports BALANCE_EXCEEDED for tokens the real treasury has plenty of.
  */
 export function getDaoExecutorAddress(chainId: number): Address {
-  const chainContracts = getContractsForChain(chainId)
-  return chainContracts.executor.address
+  const treasury = CHAIN_SPECIFIC_CONFIGS[chainId]?.addresses.nounsTreasury
+  if (treasury) return treasury
+  return getContractsForChain(chainId).executor.address
+}
+
+/**
+ * Arguments only, without the 4-byte selector `encodeFunctionData` puts first.
+ * Every transaction here carries a `signature`, and the executor prepends that
+ * signature's selector itself — leaving ours in shifts every argument by four
+ * bytes, which is how prop 396's 17.5505 stETH transfer came out as ~1e59 stETH.
+ */
+function withoutSelector(encoded: `0x${string}`): `0x${string}` {
+  return `0x${encoded.slice(10)}`
+}
+
+/**
+ * Calldata as the executor expects it next to `signature`: arguments alone.
+ * Pasted and imported actions sometimes carry the selector anyway; when the
+ * leftover is exactly four bytes and they match the signature's selector, they
+ * are dropped. Anything else is passed through untouched.
+ */
+export function normalizeCalldata(signature: string, calldata: string): `0x${string}` {
+  const hex = calldata.startsWith('0x') ? calldata.slice(2) : calldata
+  if (signature && hasDoubledSelector(signature, calldata)) return `0x${hex.slice(8)}`
+  return `0x${hex}`
+}
+
+/** True when calldata still starts with the selector the executor will add for `signature`. */
+export function hasDoubledSelector(signature: string, calldata: string): boolean {
+  const hex = (calldata.startsWith('0x') ? calldata.slice(2) : calldata).toLowerCase()
+  if (!signature || hex.length % 64 !== 8) return false
+  try {
+    return hex.startsWith(toFunctionSelector(signature).slice(2).toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The ABI-encoded arguments of a transaction's calldata.
+ *
+ * The DAO executor builds the selector from `signature` and prepends it, so
+ * calldata stored alongside a signature holds the arguments alone. Hand-written
+ * and imported actions often include the selector anyway, and decoding those
+ * four extra bytes as arguments shifts every word — which is how a 17.5505 stETH
+ * transfer reads as a number with 30-odd digits. Arguments are whole 32-byte
+ * words, so a remainder of exactly four bytes is a selector, and nothing else.
+ */
+function calldataArgs(calldata: string): `0x${string}` {
+  const hex = calldata.startsWith('0x') ? calldata.slice(2) : calldata
+  return (hex.length % 64 === 8 ? `0x${hex.slice(8)}` : `0x${hex}`) as `0x${string}`
 }
 
 /**
@@ -32,9 +86,67 @@ export const resolveAction = (action: Action): Transaction[] => {
       return resolveCustomTransaction(action)
     case 'treasury-noun-transfer':
       return resolveTreasuryNounTransfer(action)
+    case 'payer-top-up':
+      return resolvePayerTopUp(action)
     default:
       throw new Error(`Unknown action type: ${(action as any).type}`)
   }
+}
+
+type Currency = OneTimePaymentAction['currency']
+type TokenCurrency = Exclude<Currency, 'eth'>
+
+const TOKEN_DECIMALS: Record<TokenCurrency, number> = { weth: 18, usdc: 6, steth: 18, reth: 18, oeth: 18 }
+
+const tokenAddress = (currency: TokenCurrency): Address => {
+  switch (currency) {
+    case 'weth':
+      return CHAIN_CONFIG.addresses.wrappedNativeToken
+    case 'usdc':
+      return CHAIN_CONFIG.addresses.usdc
+    case 'steth':
+      return CHAIN_CONFIG.addresses.stEth
+    case 'reth':
+      return contracts['reth-token'].address
+    case 'oeth':
+      return contracts['oeth-token'].address
+  }
+}
+
+/** A call the executor makes, with calldata holding the arguments alone (it adds the selector). */
+const call = (
+  target: Address,
+  signature: string,
+  args: readonly unknown[],
+  value: bigint = 0n,
+): Transaction => {
+  const types = signature.slice(signature.indexOf('(') + 1, -1)
+  return {
+    target,
+    value: value.toString(),
+    signature,
+    calldata: types
+      ? encodeAbiParameters(parseAbiParameters(types), args as readonly unknown[])
+      : '0x',
+  }
+}
+
+/**
+ * Moves `amount` of `currency` from the DAO to `to`, the way the DAO actually holds it:
+ * - USDC isn't held by the treasury. The Payer holds it, and sends it or, when
+ *   short, records a debt it repays in order once topped up.
+ * - WETH is barely held either, so treasury ETH is wrapped first, as Nouns does.
+ * - stETH, rETH and OETH are held by the treasury and transferred directly.
+ */
+const sendToken = (currency: TokenCurrency, to: Address, amount: bigint): Transaction[] => {
+  if (currency === 'usdc') {
+    return [call(CHAIN_CONFIG.addresses.lilNounsPayer, 'sendOrRegisterDebt(address,uint256)', [to, amount])]
+  }
+  const token = tokenAddress(currency)
+  if (currency === 'weth') {
+    return [call(token, 'deposit()', [], amount), call(token, 'transfer(address,uint256)', [to, amount])]
+  }
+  return [call(token, 'transfer(address,uint256)', [to, amount])]
 }
 
 /**
@@ -45,156 +157,59 @@ const resolveOneTimePayment = (action: Extract<Action, { type: 'one-time-payment
 
   if (currency === 'eth') {
     // Direct ETH transfer
-    return [
-      {
-        target,
-        value: parseEther(amount).toString(),
-        signature: '',
-        calldata: '0x',
-      },
-    ]
+    return [{ target, value: parseEther(amount).toString(), signature: '', calldata: '0x' }]
   }
+  if (!(currency in TOKEN_DECIMALS)) throw new Error(`Unsupported currency: ${currency}`)
 
-  // ERC20 transfer (WETH, USDC, stETH, rETH, or OETH)
-  let tokenAddress: string
-  let decimals: number
-  
-  if (currency === 'weth') {
-    tokenAddress = contracts['weth-token'].address
-    decimals = 18
-  } else if (currency === 'usdc') {
-    tokenAddress = contracts['usdc-token'].address
-    decimals = 6
-  } else if (currency === 'steth') {
-    tokenAddress = contracts['steth-token'].address
-    decimals = 18
-  } else if (currency === 'reth') {
-    tokenAddress = contracts['reth-token'].address
-    decimals = 18
-  } else if (currency === 'oeth') {
-    tokenAddress = contracts['oeth-token'].address
-    decimals = 18
-  } else {
-    throw new Error(`Unsupported currency: ${currency}`)
-  }
-  
-  const amountInWei = parseUnits(amount, decimals)
-
-  return [
-    {
-      target: tokenAddress,
-      value: '0',
-      signature: 'transfer(address,uint256)',
-      calldata: encodeFunctionData({
-        abi: [
-          {
-            name: 'transfer',
-            type: 'function',
-            inputs: [
-              { name: 'to', type: 'address' },
-              { name: 'amount', type: 'uint256' },
-            ],
-            outputs: [{ name: '', type: 'bool' }],
-            stateMutability: 'nonpayable',
-          },
-        ],
-        functionName: 'transfer',
-        args: [target as `0x${string}`, amountInWei],
-      }),
-    },
-  ]
+  return sendToken(currency, target, parseUnits(amount, TOKEN_DECIMALS[currency]))
 }
+
+// stETH and OETH rebase, and their transfers can land a wei or two short of the
+// amount sent; a stream funded one wei short can't pay out its final second
+const REBASING_DUST = 2n
 
 /**
  * Resolve streaming payment action
+ *
+ * The factory deploys the stream at an address fixed by its terms, so the stream
+ * is created and then funded at that predicted address, all in one execution.
+ * `createStream` checks the deployed address against the prediction and reverts
+ * the proposal if they differ, so a wrong prediction can't strand funds.
  */
 const resolveStreamingPayment = (action: Extract<Action, { type: 'streaming-payment' }>): Transaction[] => {
   const { target, amount, currency, startTimestamp, endTimestamp } = action
-  const transactions: Transaction[] = []
-
-  // Determine token address and decimals
-  // Convert 'eth' to 'weth' if somehow it got through (shouldn't happen with validation)
-  const normalizedCurrency = currency === 'eth' ? 'weth' : currency
-  let tokenAddress: string
-  let decimals: number
-  
-  if (normalizedCurrency === 'weth') {
-    tokenAddress = contracts['weth-token'].address
-    decimals = 18
-  } else if (normalizedCurrency === 'usdc') {
-    tokenAddress = contracts['usdc-token'].address
-    decimals = 6
-  } else if (normalizedCurrency === 'steth') {
-    tokenAddress = contracts['steth-token'].address
-    decimals = 18
-  } else if (normalizedCurrency === 'reth') {
-    tokenAddress = contracts['reth-token'].address
-    decimals = 18
-  } else if (normalizedCurrency === 'oeth') {
-    tokenAddress = contracts['oeth-token'].address
-    decimals = 18
-  } else {
+  if (!(currency in TOKEN_DECIMALS)) {
     throw new Error(`Unsupported currency for streaming: ${currency}. Supported currencies: WETH, USDC, stETH, rETH, OETH`)
   }
-  
-  const amountInWei = parseUnits(amount, decimals)
 
-  // 1. Approve stream factory to spend tokens
-  transactions.push({
-    target: tokenAddress,
-    value: '0',
-    signature: 'approve(address,uint256)',
-    calldata: encodeFunctionData({
-      abi: [
-        {
-          name: 'approve',
-          type: 'function',
-          inputs: [
-            { name: 'spender', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-          ],
-          outputs: [{ name: '', type: 'bool' }],
-          stateMutability: 'nonpayable',
-        },
-      ],
-      functionName: 'approve',
-      args: [contracts['stream-factory'].address as `0x${string}`, amountInWei],
-    }),
+  const executor = CHAIN_CONFIG.addresses.nounsTreasury
+  const token = tokenAddress(currency)
+  const tokenAmount = parseUnits(amount, TOKEN_DECIMALS[currency])
+  const startTime = BigInt(Math.floor(startTimestamp / 1000))
+  const stopTime = BigInt(Math.floor(endTimestamp / 1000))
+  const stream = predictStreamAddress({
+    msgSender: executor,
+    payer: executor,
+    recipient: target,
+    tokenAmount,
+    tokenAddress: token,
+    startTime,
+    stopTime,
   })
+  const funding = currency === 'steth' || currency === 'oeth' ? tokenAmount + REBASING_DUST : tokenAmount
 
-  // 2. Create stream
-  transactions.push({
-    target: contracts['stream-factory'].address,
-    value: '0',
-    signature: 'createStream(address,address,uint256,uint256,uint256)',
-    calldata: encodeFunctionData({
-      abi: [
-        {
-          name: 'createStream',
-          type: 'function',
-          inputs: [
-            { name: 'token', type: 'address' },
-            { name: 'recipient', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-            { name: 'startTime', type: 'uint256' },
-            { name: 'endTime', type: 'uint256' },
-          ],
-          outputs: [],
-          stateMutability: 'nonpayable',
-        },
-      ],
-      functionName: 'createStream',
-      args: [
-        tokenAddress as `0x${string}`,
-        target as `0x${string}`,
-        amountInWei,
-        BigInt(Math.floor(startTimestamp / 1000)),
-        BigInt(Math.floor(endTimestamp / 1000)),
-      ],
-    }),
-  })
-
-  return transactions
+  return [
+    call(STREAM_FACTORY, 'createStream(address,uint256,address,uint256,uint256,uint8,address)', [
+      target,
+      tokenAmount,
+      token,
+      startTime,
+      stopTime,
+      0,
+      stream,
+    ]),
+    ...sendToken(currency, stream, funding),
+  ]
 }
 
 /**
@@ -282,7 +297,7 @@ const resolveCustomTransaction = (action: Extract<Action, { type: 'custom-transa
     // from the signature to the calldata. So we need to strip the selector from
     // the encoded calldata to avoid double-encoding.
     // The selector is the first 4 bytes (8 hex characters + '0x' = 10 chars)
-    const calldataWithoutSelector = ('0x' + calldataWithSelector.slice(10)) as `0x${string}`;
+    const calldataWithoutSelector = withoutSelector(calldataWithSelector);
 
     console.log('[Transaction] Encoded custom transaction:', {
       functionName,
@@ -319,32 +334,35 @@ const resolveCustomTransaction = (action: Extract<Action, { type: 'custom-transa
 /**
  * Resolve treasury noun transfer action
  */
-const resolveTreasuryNounTransfer = (action: Extract<Action, { type: 'treasury-noun-transfer' }>): Transaction[] => {
-  const { nounId, target } = action
-
+/**
+ * Resolve payer top-up action
+ *
+ * The Payer only holds USDC, and is refilled by the TokenBuyer, which sells ETH
+ * it's sent for USDC and forwards it. Lil Nouns has always topped up this way:
+ * plain ETH sent to the TokenBuyer (props 241, 254, 274, 281, 283 and 354).
+ */
+const resolvePayerTopUp = (action: Extract<Action, { type: 'payer-top-up' }>): Transaction[] => {
+  if (action.currency !== 'eth') {
+    throw new Error(`Payer top-ups are ETH only: the TokenBuyer can't take ${String(action.currency).toUpperCase()}`)
+  }
   return [
     {
-      target: contracts.token.address,
-      value: '0',
-      signature: 'transferFrom(address,address,uint256)',
-      calldata: encodeFunctionData({
-        abi: [
-          {
-            name: 'transferFrom',
-            type: 'function',
-            inputs: [
-              { name: 'from', type: 'address' },
-              { name: 'to', type: 'address' },
-              { name: 'tokenId', type: 'uint256' },
-            ],
-            outputs: [],
-            stateMutability: 'nonpayable',
-          },
-        ],
-        functionName: 'transferFrom',
-        args: [contracts.executor.address as `0x${string}`, target as `0x${string}`, BigInt(nounId)],
-      }),
+      target: CHAIN_CONFIG.addresses.lilNounsTokenBuyer,
+      value: parseEther(action.amount).toString(),
+      signature: '',
+      calldata: '0x',
     },
+  ]
+}
+
+const resolveTreasuryNounTransfer = (action: Extract<Action, { type: 'treasury-noun-transfer' }>): Transaction[] => {
+  const { nounId, target } = action
+  return [
+    call(CHAIN_CONFIG.addresses.nounsToken, 'transferFrom(address,address,uint256)', [
+      CHAIN_CONFIG.addresses.nounsTreasury,
+      target,
+      BigInt(nounId),
+    ]),
   ]
 }
 
@@ -375,7 +393,8 @@ export const resolveActions = (actions: Action[]): Transaction[] => {
         target: action.target,
         amount: action.amount,
         currency: action.currency,
-        duration: action.duration
+        startTimestamp: action.startTimestamp,
+        endTimestamp: action.endTimestamp
       } : action.type === 'treasury-noun-transfer' ? {
         nounId: action.nounId,
         target: action.target
@@ -412,18 +431,72 @@ export const calculateTotalValue = (transactions: Transaction[]): bigint => {
   return transactions.reduce((total, tx) => total + BigInt(tx.value), 0n)
 }
 
+const STREAM_SIGNATURE = 'createStream(address,uint256,address,uint256,uint256,uint8,address)'
+
+const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+const currencyOf = (token: string): TokenCurrency | undefined =>
+  (Object.keys(TOKEN_DECIMALS) as TokenCurrency[]).find((c) => sameAddress(tokenAddress(c), token))
+
+/** `to` and `amount` of a two-argument payment call, or undefined if it doesn't decode. */
+const decodeSend = (tx: Transaction): { to: Address; amount: bigint } | undefined => {
+  try {
+    const [to, amount] = decodeAbiParameters(parseAbiParameters('address, uint256'), calldataArgs(tx.calldata))
+    return { to, amount }
+  } catch {
+    return undefined
+  }
+}
+
+/** The one-time token payment starting at `i`, in any shape `sendToken` produces. */
+const decodeTokenPayment = (
+  transactions: Transaction[],
+  i: number,
+): { currency: TokenCurrency; to: Address; amount: bigint; length: number } | undefined => {
+  const tx = transactions[i]
+  if (tx.signature === 'sendOrRegisterDebt(address,uint256)' && sameAddress(tx.target, CHAIN_CONFIG.addresses.lilNounsPayer)) {
+    const send = decodeSend(tx)
+    return send && { currency: 'usdc', ...send, length: 1 }
+  }
+  const currency = currencyOf(tx.target)
+  if (!currency) return undefined
+  // WETH is wrapped from treasury ETH right before it's sent
+  if (currency === 'weth' && tx.signature === 'deposit()') {
+    const next = transactions[i + 1]
+    const send = next && sameAddress(next.target, tx.target) && next.signature === 'transfer(address,uint256)' ? decodeSend(next) : undefined
+    return send && send.amount === BigInt(tx.value) ? { currency, ...send, length: 2 } : undefined
+  }
+  if (tx.signature === 'transfer(address,uint256)') {
+    const send = decodeSend(tx)
+    return send && { currency, ...send, length: 1 }
+  }
+  return undefined
+}
+
+/** How many transactions from `i` fund `stream`, or 0 when what follows isn't its funding. */
+const fundingLength = (transactions: Transaction[], i: number, currency: TokenCurrency, stream: Address): number => {
+  const payment = transactions[i] ? decodeTokenPayment(transactions, i) : undefined
+  return payment && payment.currency === currency && sameAddress(payment.to, stream) ? payment.length : 0
+}
+
 /**
  * Reverse-engineer actions from transactions
  * Attempts to detect action types and decode calldata
  */
 export const transactionsToActions = (transactions: Transaction[], chainId: number = 1): Action[] => {
   const actions: Action[] = []
-  const chainContracts = getContractsForChain(chainId)
   
   let i = 0
   while (i < transactions.length) {
     const tx = transactions[i]
     
+    // ETH sent to the TokenBuyer tops up the Payer
+    if (tx.signature === '' && BigInt(tx.value) > 0n && sameAddress(tx.target, CHAIN_CONFIG.addresses.lilNounsTokenBuyer)) {
+      actions.push({ type: 'payer-top-up', amount: formatEther(BigInt(tx.value)), currency: 'eth' })
+      i++
+      continue
+    }
+
     // Check for ETH transfer (one-time payment)
     if (tx.signature === '' && BigInt(tx.value) > 0n) {
       actions.push({
@@ -436,145 +509,56 @@ export const transactionsToActions = (transactions: Transaction[], chainId: numb
       continue
     }
     
-    // Check for ERC20 transfer (one-time payment)
-    if (tx.signature === 'transfer(address,uint256)') {
+    // Streaming payment: createStream, then the funding sent to the stream it creates
+    if (tx.signature === STREAM_SIGNATURE && sameAddress(tx.target, STREAM_FACTORY)) {
       try {
-        // Decode calldata - calldata is stored WITHOUT selector (executor prepends it)
-        // decodeAbiParameters can decode just the parameters
-        const decoded = decodeAbiParameters(
-          [
-            { name: 'to', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-          ],
-          tx.calldata as `0x${string}`
+        const [recipient, tokenAmount, token, startTime, stopTime, , stream] = decodeAbiParameters(
+          parseAbiParameters('address, uint256, address, uint256, uint256, uint8, address'),
+          calldataArgs(tx.calldata),
         )
-        
-        const recipient = decoded[0] as Address
-        const amount = decoded[1] as bigint
-        
-        // Determine currency based on token address
-        // Note: lido-token address maps to steth since they're the same token
-        let currency: 'weth' | 'usdc' | 'steth' | 'reth' | 'oeth' = 'weth'
-        let decimals = 18
-        
-        if (tx.target.toLowerCase() === chainContracts['weth-token'].address.toLowerCase()) {
-          currency = 'weth'
-          decimals = 18
-        } else if (tx.target.toLowerCase() === chainContracts['usdc-token'].address.toLowerCase()) {
-          currency = 'usdc'
-          decimals = 6
-        } else if (
-          tx.target.toLowerCase() === chainContracts['steth-token'].address.toLowerCase() ||
-          tx.target.toLowerCase() === chainContracts['lido-token'].address.toLowerCase()
-        ) {
-          // Map both steth-token and lido-token addresses to 'steth' (they're the same token)
-          currency = 'steth'
-          decimals = 18
-        } else if (tx.target.toLowerCase() === chainContracts['reth-token'].address.toLowerCase()) {
-          currency = 'reth'
-          decimals = 18
-        } else if (tx.target.toLowerCase() === chainContracts['oeth-token'].address.toLowerCase()) {
-          currency = 'oeth'
-          decimals = 18
+        const currency = currencyOf(token)
+        const funding = currency ? fundingLength(transactions, i + 1, currency, stream) : 0
+        if (currency && funding > 0) {
+          actions.push({
+            type: 'streaming-payment',
+            target: recipient,
+            amount: formatUnits(tokenAmount, TOKEN_DECIMALS[currency]),
+            currency,
+            startTimestamp: Number(startTime) * 1000,
+            endTimestamp: Number(stopTime) * 1000,
+            predictedStreamContractAddress: stream,
+          })
+          i += 1 + funding
+          continue
         }
-        
-        actions.push({
-          type: 'one-time-payment',
-          target: recipient,
-          amount: formatUnits(amount, decimals),
-          currency,
-        })
-        i++
-        continue
-      } catch (error) {
-        console.warn('Failed to decode ERC20 transfer:', error)
-      }
-    }
-    
-    // Check for streaming payment (approve + createStream)
-    if (tx.signature === 'approve(address,uint256)' && 
-        i + 1 < transactions.length &&
-        transactions[i + 1].signature === 'createStream(address,address,uint256,uint256,uint256)') {
-      try {
-        const approveTx = tx
-        const createStreamTx = transactions[i + 1]
-        
-        // Decode approve to get amount - calldata stored WITHOUT selector
-        const approveDecoded = decodeAbiParameters(
-          [
-            { name: 'spender', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-          ],
-          approveTx.calldata as `0x${string}`
-        )
-        const amount = approveDecoded[1] as bigint
-        
-        // Decode createStream to get recipient and timestamps - calldata stored WITHOUT selector
-        const streamDecoded = decodeAbiParameters(
-          [
-            { name: 'token', type: 'address' },
-            { name: 'recipient', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-            { name: 'startTime', type: 'uint256' },
-            { name: 'endTime', type: 'uint256' },
-          ],
-          createStreamTx.calldata as `0x${string}`
-        )
-        
-        const recipient = streamDecoded[1] as Address
-        const startTimestamp = Number(streamDecoded[3]) * 1000
-        const endTimestamp = Number(streamDecoded[4]) * 1000
-        
-        // Determine currency
-        const tokenAddress = streamDecoded[0] as Address
-        let currency: 'weth' | 'usdc' = 'weth'
-        let decimals = 18
-        
-        if (tokenAddress.toLowerCase() === chainContracts['usdc-token'].address.toLowerCase()) {
-          currency = 'usdc'
-          decimals = 6
-        }
-        
-        actions.push({
-          type: 'streaming-payment',
-          target: recipient,
-          amount: formatUnits(amount, decimals),
-          currency,
-          startTimestamp,
-          endTimestamp,
-          predictedStreamContractAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-        })
-        
-        i += 2 // Skip both transactions
-        continue
       } catch (error) {
         console.warn('Failed to decode streaming payment:', error)
       }
     }
-    
+
+    // One-time token payment, in whichever shape `sendToken` builds for its currency
+    const payment = decodeTokenPayment(transactions, i)
+    if (payment) {
+      actions.push({
+        type: 'one-time-payment',
+        target: payment.to,
+        amount: formatUnits(payment.amount, TOKEN_DECIMALS[payment.currency]),
+        currency: payment.currency,
+      })
+      i += payment.length
+      continue
+    }
+
     // Check for treasury noun transfer
     if (tx.signature === 'transferFrom(address,address,uint256)' &&
-        tx.target.toLowerCase() === chainContracts.token.address.toLowerCase()) {
+        sameAddress(tx.target, CHAIN_CONFIG.addresses.nounsToken)) {
       try {
-        const decoded = decodeAbiParameters(
-          [
-            { name: 'from', type: 'address' },
-            { name: 'to', type: 'address' },
-            { name: 'tokenId', type: 'uint256' },
-          ],
-          tx.calldata as `0x${string}`
+        const [from, recipient, nounId] = decodeAbiParameters(
+          parseAbiParameters('address, address, uint256'),
+          calldataArgs(tx.calldata),
         )
-        
-        const recipient = decoded[1] as Address
-        const nounId = decoded[2] as bigint
-        
-        // Verify it's from the executor (treasury)
-        if (decoded[0].toLowerCase() === chainContracts.executor.address.toLowerCase()) {
-          actions.push({
-            type: 'treasury-noun-transfer',
-            nounId: nounId.toString(),
-            target: recipient,
-          })
+        if (sameAddress(from, CHAIN_CONFIG.addresses.nounsTreasury)) {
+          actions.push({ type: 'treasury-noun-transfer', nounId: nounId.toString(), target: recipient })
           i++
           continue
         }
@@ -582,7 +566,7 @@ export const transactionsToActions = (transactions: Transaction[], chainId: numb
         console.warn('Failed to decode noun transfer:', error)
       }
     }
-    
+
     // Default: treat as custom transaction
     try {
       // Parse signature to get function name and params
@@ -598,7 +582,7 @@ export const transactionsToActions = (transactions: Transaction[], chainId: numb
             // decodeAbiParameters can decode just the parameters (without selector)
             const decoded = decodeAbiParameters(
               paramTypes.map((type, i) => ({ name: `arg${i}`, type })),
-              tx.calldata as `0x${string}`
+              calldataArgs(tx.calldata)
             )
             
             // Convert decoded values to strings

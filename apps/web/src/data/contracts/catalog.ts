@@ -68,8 +68,10 @@ export const CONTRACT_GROUPS: CatalogGroup[] = [
       { key: "wrappedNativeToken", name: "WETH" },
       { key: "usdc", name: "USDC" },
       { key: "stEth", name: "stETH" },
-      { key: "nounsPayer", name: "Payer" },
-      { key: "nounsTokenBuyer", name: "Token Buyer" },
+      { key: "lilNounsPayer", name: "Payer" },
+      { key: "lilNounsTokenBuyer", name: "Token Buyer" },
+      { key: "nounsDaoPayer", name: "Nouns DAO Payer", note: "Nouns DAO's, not Lil Nouns'" },
+      { key: "nounsDaoTokenBuyer", name: "Nouns DAO Token Buyer", note: "Nouns DAO's, not Lil Nouns'" },
     ],
   },
 ];

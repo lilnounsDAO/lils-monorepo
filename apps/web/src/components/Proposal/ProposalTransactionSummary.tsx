@@ -25,6 +25,7 @@ import { Button } from "../ui/button";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { getContractsForChain } from "@/contracts/proposal-contracts";
+import { hasDoubledSelector } from "@/utils/transactions";
 import { useChainId } from "wagmi";
 
 interface ProposalTransactionSummaryProps {
@@ -66,6 +67,10 @@ export default function ProposalTransactionSummary({
 
   const decodedTransactions = transactions.map(decodeTransaction);
   const summary = parseDecodedTransactionsSummary(decodedTransactions, chainId);
+  // The summary decodes past a doubled selector so it reads as intended, but on
+  // chain the executor adds its own and every argument shifts — flag it loudly.
+  const malformed = transactions.map((tx) => hasDoubledSelector(tx.signature, tx.calldata));
+  const anyMalformed = malformed.some(Boolean);
 
   const handleCopyActions = async () => {
     try {
@@ -126,6 +131,11 @@ export default function ProposalTransactionSummary({
             </>
           ) : (
             `${decodedTransactions.length} transaction${decodedTransactions.length > 1 ? "s" : ""}`
+          )}
+          {anyMalformed && (
+            <span className="block text-semantic-negative label-sm">
+              Malformed calldata — this proposal will not execute as written
+            </span>
           )}
         </span>
         <span className="underline label-md">Details</span>
@@ -215,6 +225,15 @@ export default function ProposalTransactionSummary({
                     </div>
                   </div>
                   
+                  {malformed[i] && (
+                    <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                      <strong>Malformed calldata:</strong> it already starts with the{" "}
+                      {transactions[i].signature} selector, and the executor adds it again.
+                      Every argument shifts by four bytes, so the call on chain differs from
+                      what is shown here and will likely revert.
+                    </div>
+                  )}
+
                   {/* Simulation Error Message */}
                   {simulationError && (
                     <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
@@ -263,7 +282,12 @@ function decodeTransaction(
 
       let decoded: (string | Address | bigint | number)[];
       try {
-        decoded = decodeAbiParameters(abi.inputs, transaction.calldata) as (
+        decoded = decodeAbiParameters(
+          abi.inputs,
+          // Decoded exactly as stored, the way the executor will read it: a
+          // doubled selector then shows up as absurd amounts rather than hiding.
+          transaction.calldata as `0x${string}`,
+        ) as (
           | string
           | Address
           | bigint
@@ -294,11 +318,11 @@ function DecodedTransactionRenderer({
   const lilNounsTokenBuyerAddress = contracts["token-buyer"].address;
   
   // Check for both Nouns DAO and Lil Nouns DAO payer contracts
-  const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsPayer;
+  const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsDaoPayer;
   const lilNounsPayer = contracts.payer.address;
   
   // Check for both Nouns DAO and Lil Nouns DAO token buyer contracts
-  const nounsDaoTokenBuyer = CHAIN_CONFIG.addresses.nounsTokenBuyer;
+  const nounsDaoTokenBuyer = CHAIN_CONFIG.addresses.nounsDaoTokenBuyer;
   
   const isSendOrRegisterDebt = 
     (isAddressEqual(to, nounsDaoPayer) || isAddressEqual(to, lilNounsPayer)) &&
@@ -436,9 +460,9 @@ function parseDecodedTransactionsSummary(
   try {
     const contracts = getContractsForChain(chainId);
     const lilNounsTokenBuyerAddress = contracts["token-buyer"].address;
-    const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsPayer;
+    const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsDaoPayer;
     const lilNounsPayer = contracts.payer.address;
-    const nounsDaoTokenBuyer = CHAIN_CONFIG.addresses.nounsTokenBuyer;
+    const nounsDaoTokenBuyer = CHAIN_CONFIG.addresses.nounsDaoTokenBuyer;
 
     for (const tx of transactions) {
       // Check if this is ETH transfer to payer or token buyer (topups) - exclude from summary

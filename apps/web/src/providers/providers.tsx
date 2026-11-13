@@ -16,7 +16,7 @@ import { createConfig } from "wagmi";
 import { EnsAvatar } from "@/components/EnsAvatar";
 
 export const PROJECT_ID = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
-const APP_URL = import.meta.env.VITE_URL || 'https://www.lilnouns.wtf';
+const APP_URL = import.meta.env.VITE_URL || 'https://lilnouns.wtf';
 
 // Validate required environment variables
 if (typeof window !== 'undefined' && !PROJECT_ID) {

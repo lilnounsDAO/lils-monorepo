@@ -3,13 +3,27 @@
  * Core simulation logic for validating proposal transactions
  */
 
-import { Address } from 'viem'
+import { Address, toFunctionSelector } from 'viem'
 import type { Transaction } from '@/utils/transactions'
 import type {
   TenderlySimulationRequest,
   TenderlySimulationResponse,
   SimulationResult
 } from '@/types/tenderly'
+
+/**
+ * The calldata the executor actually sends: NounsDAOExecutor prepends
+ * bytes4(keccak256(signature)) whenever a signature is set. Simulating the
+ * stored calldata alone skips that step — a proposal whose calldata already
+ * carries the selector (like Lil Nouns prop 396) then passes here while it
+ * reverts on chain, and a correctly encoded one calls the target with no
+ * selector at all.
+ */
+function executorCalldata(transaction: Transaction): `0x${string}` {
+  const data = (transaction.calldata || '0x').replace(/^0x/, '')
+  if (!transaction.signature) return `0x${data}`
+  return `${toFunctionSelector(transaction.signature)}${data}` as `0x${string}`
+}
 
 const TENDERLY_ACCESS_KEY = import.meta.env.VITE_TENDERLY_ACCESS_KEY
 const TENDERLY_USERNAME = import.meta.env.VITE_TENDERLY_USERNAME // Optional, for backward compatibility
@@ -129,7 +143,7 @@ export async function simulateTransaction(
     gasLimit: gasLimitHex, // Also set gasLimit explicitly (some APIs expect this)
     gasPrice: `0x${maxFeePerGas.toString(16)}`, // Use maxFeePerGas for legacy compatibility
     value: valueHex, // Must be hex string
-    data: transaction.calldata // Will be mapped to 'input' in the actual request
+    data: executorCalldata(transaction) // Will be mapped to 'input' in the actual request
   }
   
   console.log('[Tenderly] Formatted simulation request:', {
@@ -394,7 +408,7 @@ async function simulateTransactionREST(
   const simulationRequest: any = {
     from: fromAddress,
     to: transaction.target,
-    input: transaction.calldata,
+    input: executorCalldata(transaction),
     value: valueHex,
     estimate_gas: true,
     network_id: networkId,
@@ -718,30 +732,12 @@ async function simulateTransactionBundleREST(
   }
 
   const networkId = NETWORK_IDS[network]
-  const maxBalance = '0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
-
-  // Build initial state overrides (executor balance + admin permissions)
-  // These will be applied to the first transaction
-  const initialStateOverrides: Record<string, any> = {
-    [daoExecutorAddress.toLowerCase()]: {
-      balance: maxBalance
-    }
-  }
-
-  // Add admin slot override for each unique target contract
-  const targetContracts = new Set(transactions.map(tx => tx.target.toLowerCase()))
-  for (const targetContract of targetContracts) {
-    const adminSlot = "0x0000000000000000000000000000000000000000000000000000000000000000"
-    const addressWithoutPrefix = daoExecutorAddress.toLowerCase().replace(/^0x/, '')
-    const paddedAddress = addressWithoutPrefix.padStart(64, '0')
-    const executorValue = `0x${paddedAddress}`
-    
-    initialStateOverrides[targetContract] = {
-      state: {
-        [adminSlot]: executorValue
-      }
-    }
-  }
+  // No state overrides: the bundle runs against the treasury exactly as it is.
+  // Granting it unlimited ETH let requests larger than the treasury pass, and
+  // writing it into every target's slot 0 (as a stand-in admin) let calls it has
+  // no permission for pass too. Tenderly charges no gas at the default gas
+  // price, so the executor's real balance only has to cover what's sent.
+  const initialStateOverrides: Record<string, any> = {}
 
   // Build simulation array for bundle API (matching Nouns Camp format)
   const simulations = transactions.map((tx, index) => {
@@ -760,7 +756,7 @@ async function simulateTransactionBundleREST(
     const simulation: any = {
       from: daoExecutorAddress,
       to: tx.target,
-      input: tx.calldata,
+      input: executorCalldata(tx),
       value: valueHex,
       estimate_gas: true,
       network_id: networkId,

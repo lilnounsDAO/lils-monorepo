@@ -1,10 +1,10 @@
 "use client";
-import { getLogs } from "viem/actions";
 import { decodeEventLog } from "viem";
 
 import { CHAIN_CONFIG } from "@/config";
 import { Topic } from "@/data/goldsky/governance/getTopics";
-import { nounsDaoDataConfig } from "../nounsDaoDataContract";
+import { getLogsChunked } from "@/utils/getLogsChunked";
+import { hasDaoDataContract } from "@/utils/daoVersion";
 
 type TopicCreatedLog = {
   args: {
@@ -35,12 +35,16 @@ const topicCreatedEvent = {
  * Used when subgraph/Gateway data is missing.
  */
 export async function getTopicsOnchain(): Promise<Topic[]> {
+  // Lil Nouns mainnet points nounsDAODataProxy at the DAO proxy itself, which
+  // never emits TopicCreated, so scanning it just burns RPC calls.
+  if (!hasDaoDataContract()) {
+    return [];
+  }
+
   try {
-    const logs = await getLogs(CHAIN_CONFIG.publicClient, {
+    const logs = await getLogsChunked(CHAIN_CONFIG.publicClient, {
       address: CHAIN_CONFIG.addresses.nounsDAODataProxy,
       event: topicCreatedEvent,
-      fromBlock: "earliest",
-      toBlock: "latest",
     });
 
     const decodedLogs = logs.map((log) => {

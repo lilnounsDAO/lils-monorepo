@@ -171,7 +171,11 @@ function ReasonBody({ text }: { text?: string }) {
 }
 
 // Body under a vote/feedback: the voter's own words, revotes and replies.
-function VoteBody({ event }: { event: DigestEvent }) {
+export function VoteBody({
+  event,
+}: {
+  event: Pick<DigestEvent, "reason" | "replies" | "revotes">;
+}) {
   return (
     <>
       {event.revotes?.map((item, i) => (

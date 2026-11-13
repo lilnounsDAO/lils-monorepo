@@ -1,121 +1,53 @@
 /**
  * Contract Definitions
- * Define all contract addresses and chain IDs for your DAO
+ * The contracts the proposal editor builds transactions against, by chain.
+ *
+ * Lil Nouns' own contracts (DAO, treasury, token, Payer, TokenBuyer) and the
+ * tokens the treasury holds come from CHAIN_SPECIFIC_CONFIGS, the same source
+ * the rest of the app uses. This file used to carry its own copies, and they
+ * were Nouns DAO's — a treasury Noun transfer built from them moved a Nouns
+ * token out of the Nouns treasury, and the treasury balance view read the wrong
+ * executor.
  */
 
 import { Address } from 'viem'
 import { mainnet, sepolia } from 'viem/chains'
+import { CHAIN_SPECIFIC_CONFIGS } from '@/config'
+import { STREAM_FACTORY } from '@/utils/streams'
 
 export interface ContractInfo {
   address: Address
   chainId: number
 }
 
+const contractsFor = (chainId: typeof mainnet.id | typeof sepolia.id) => {
+  const addresses = CHAIN_SPECIFIC_CONFIGS[chainId].addresses
+  const at = (address: Address): ContractInfo => ({ address, chainId })
+  return {
+    dao: at(addresses.nounsDaoProxy),
+    executor: at(addresses.nounsTreasury),
+    token: at(addresses.nounsToken),
+    payer: at(addresses.lilNounsPayer),
+    'token-buyer': at(addresses.lilNounsTokenBuyer),
+    'stream-factory': at(STREAM_FACTORY),
+    'weth-token': at(addresses.wrappedNativeToken),
+    'usdc-token': at(addresses.usdc),
+    'steth-token': at(addresses.stEth),
+    // stETH is Lido's token; kept as an alias so either name resolves
+    'lido-token': at(addresses.stEth),
+    // Not deployed on Sepolia; the mainnet addresses are kept so decoding still names them
+    'reth-token': at('0xae78736Cd615f374D3085123A210448E74Fc6393'), // Rocket Pool rETH
+    'oeth-token': at('0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3'), // Origin ETH (OETH)
+  }
+}
+
 /**
  * Contract addresses by chain
  */
 const CONTRACTS_BY_CHAIN = {
-  [mainnet.id]: {
-    dao: {
-      address: '0x6f3E6272A167e8AcCb32072d08E0957F9c79223d' as Address, // Lil Nouns DAO Proxy
-      chainId: mainnet.id
-    },
-    executor: {
-      address: '0xb1a32FC9F9D8b2cf86C068Cae13108809547ef71' as Address, // Lil Nouns Treasury
-      chainId: mainnet.id
-    },
-    token: {
-      address: '0x9C8fF314C9Bc7F6e59A9d9225Fb22946427eDC03' as Address, // Lil Nouns Token
-      chainId: mainnet.id
-    },
-    payer: {
-      address: '0xF62387d21153fdcbB06Ab3026c2089e418688164' as Address, // Nouns Payer
-      chainId: mainnet.id
-    },
-    'token-buyer': {
-      address: '0x387140cD0132ff750263f08aCfdFbEc7b0Cf63c0' as Address,
-      chainId: mainnet.id
-    },
-    'stream-factory': {
-      address: '0xb2fFEEF1F68CfacDeFdAFe6F1a9D30Ff47C7cB5e' as Address, // Nouns Stream Factory
-      chainId: mainnet.id
-    },
-    'weth-token': {
-      address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as Address, // WETH on mainnet
-      chainId: mainnet.id
-    },
-    'usdc-token': {
-      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as Address, // USDC on mainnet
-      chainId: mainnet.id
-    },
-    'steth-token': {
-      address: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84' as Address, // stETH on mainnet
-      chainId: mainnet.id
-    },
-    'lido-token': {
-      address: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84' as Address, // LIDO token (same as stETH)
-      chainId: mainnet.id
-    },
-    'reth-token': {
-      address: '0xae78736Cd615f374D3085123A210448E74Fc6393' as Address, // Rocket Pool rETH on mainnet
-      chainId: mainnet.id
-    },
-    'oeth-token': {
-      address: '0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3' as Address, // Origin ETH (OETH) on mainnet
-      chainId: mainnet.id
-    }
-  },
-  [sepolia.id]: {
-    dao: {
-      address: '0x204b38EF237fb3C1433313cA2b0f69F40Fda142F' as Address,
-      chainId: sepolia.id
-    },
-    executor: {
-      address: '0x73db56FdA5ca18a51fc7422E893ef83b83772833' as Address,
-      chainId: sepolia.id
-    },
-    token: {
-      address: '0x1bCcE5eC2A785E7e9807766c4dbB72aB4a0014Cf' as Address,
-      chainId: sepolia.id
-    },
-    payer: {
-      address: '0xF62387d21153fdcbB06Ab3026c2089e418688164' as Address, // Nouns Payer (same as mainnet)
-      chainId: sepolia.id
-    },
-    'token-buyer': {
-      address: '0x387140cD0132ff750263f08aCfdFbEc7b0Cf63c0' as Address, // Same as mainnet
-      chainId: sepolia.id
-    },
-    'stream-factory': {
-      address: '0xb2fFEEF1F68CfacDeFdAFe6F1a9D30Ff47C7cB5e' as Address, // Same as mainnet
-      chainId: sepolia.id
-    },
-    'weth-token': {
-      address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as Address, // WETH (same on Sepolia)
-      chainId: sepolia.id
-    },
-    'usdc-token': {
-      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as Address, // USDC (same on Sepolia)
-      chainId: sepolia.id
-    },
-    'steth-token': {
-      address: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84' as Address, // stETH (same on Sepolia)
-      chainId: sepolia.id
-    },
-    'lido-token': {
-      address: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84' as Address, // LIDO token (same as stETH)
-      chainId: sepolia.id
-    },
-    'reth-token': {
-      address: '0xae78736Cd615f374D3085123A210448E74Fc6393' as Address, // Rocket Pool rETH (same on Sepolia)
-      chainId: sepolia.id
-    },
-    'oeth-token': {
-      address: '0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3' as Address, // Origin ETH (OETH) (same on Sepolia)
-      chainId: sepolia.id
-    }
-  }
-} as const
+  [mainnet.id]: contractsFor(mainnet.id),
+  [sepolia.id]: contractsFor(sepolia.id),
+}
 
 /**
  * Get contracts for a specific chain ID

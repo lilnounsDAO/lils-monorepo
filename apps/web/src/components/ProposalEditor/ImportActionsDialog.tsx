@@ -135,7 +135,7 @@ const ImportActionsDialog: React.FC<ImportActionsDialogProps> = ({
                     <li><code className="text-xs bg-gray-200 px-1 py-0.5 rounded">streaming-payment</code> - Create a token stream over time</li>
                     <li><code className="text-xs bg-gray-200 px-1 py-0.5 rounded">custom-transaction</code> - Call any contract function</li>
                     <li><code className="text-xs bg-gray-200 px-1 py-0.5 rounded">treasury-noun-transfer</code> - Transfer a Noun from treasury</li>
-                    <li><code className="text-xs bg-gray-200 px-1 py-0.5 rounded">payer-top-up</code> - Top up the payer contract</li>
+                    <li><code className="text-xs bg-gray-200 px-1 py-0.5 rounded">payer-top-up</code> - Send ETH to the TokenBuyer, which funds the Payer with USDC</li>
                   </ul>
                 </div>
 
@@ -188,7 +188,7 @@ const ImportActionsDialog: React.FC<ImportActionsDialogProps> = ({
               <div>
                 <h5 className="font-semibold text-gray-800 mb-1">Payer Top-Up</h5>
                 <code className="text-xs block bg-white p-2 rounded border">
-                  {`{ type: "payer-top-up", amount: "10", currency: "eth"|"steth"|"reth"|"oeth" }`}
+                  {`{ type: "payer-top-up", amount: "10", currency: "eth" }`}
                 </code>
               </div>
             </div>

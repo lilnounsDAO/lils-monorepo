@@ -3,9 +3,10 @@ import { Descendant, Node } from 'slate'
 import RichTextEditor, { createEmptyParagraphElement } from './RichTextEditor'
 import ActionDialog from './ActionDialog'
 import SubmissionDialog from './SubmissionDialog'
+import SimulateVotesDialog from './SimulateVotesDialog'
 import { Button } from '@/components/ui/button'
 import type { Action } from '@/types/proposal-editor'
-import { Plus, ChevronDown, ChevronUp, Copy, ClipboardPaste, Save, Trash2 } from 'lucide-react'
+import { Plus, ChevronDown, ChevronUp, Copy, ClipboardPaste, Save, Trash2, Vote } from 'lucide-react'
 import { useAccount, useSignMessage } from 'wagmi'
 import { useEnsResolution } from '@/hooks/useEnsResolution'
 import { isAddress, parseEther, parseUnits } from 'viem'
@@ -130,6 +131,7 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
   const [isActionDialogOpen, setIsActionDialogOpen] = useState(false)
   const [isSubmissionDialogOpen, setIsSubmissionDialogOpen] = useState(false)
+  const [isSimulateVotesOpen, setIsSimulateVotesOpen] = useState(false)
   const [editingActionIndex, setEditingActionIndex] = useState<number | null>(null)
   const { resolveEnsAddress } = useEnsResolution()
   const [resolvedAddresses, setResolvedAddresses] = useState<Record<string, string>>({})
@@ -1789,6 +1791,17 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         </div>
       )}
 
+      {contentType !== 'topic' && (
+        <button
+          type="button"
+          onClick={() => setIsSimulateVotesOpen(true)}
+          className="mb-2 flex w-full items-center justify-center gap-2 rounded border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+        >
+          <Vote size={16} />
+          Simulate votes
+        </button>
+      )}
+
       {onSubmit && (
         <button
           onClick={() => {
@@ -2277,6 +2290,12 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
       />
 
       {/* Submission Dialog */}
+      <SimulateVotesDialog
+        isOpen={isSimulateVotesOpen}
+        onClose={() => setIsSimulateVotesOpen(false)}
+        title={currentTitle}
+      />
+
       <SubmissionDialog
         isOpen={isSubmissionDialogOpen}
         onClose={() => setIsSubmissionDialogOpen(false)}
