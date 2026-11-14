@@ -351,7 +351,7 @@ function DecodedTransactionRenderer({
       </div>
       {args.map((param, i) => (
         <div className="flex pl-4" key={i}>
-          <FunctionArgumentRenderer {...param} />
+          <FunctionArgumentRenderer {...param} parentTx={{ to, functionName, args, value }} />
           {i != args.length - 1 && ","}
         </div>
       ))}
@@ -412,6 +412,11 @@ function FunctionArgumentRenderer({
     case "uint8":
       // Format large numbers appropriately
       const numValue = typeof value === 'bigint' ? value : BigInt(value);
+      // An amount moved by a known token reads in that token, not ETH
+      const token = parentTx ? tokenAmountUnit(parentTx) : undefined;
+      if (token) {
+        return <>{formatTokenAmount(numValue, token.decimals)} {token.symbol}</>;
+      }
       // If it's a very large number (likely wei), format as ETH
       // But don't format if it's part of sendOrRegisterDebt (USDC amount)
       if (numValue > BigInt(10 ** 15)) {
@@ -421,6 +426,31 @@ function FunctionArgumentRenderer({
     default:
       return <>{value.toString()}</>;
   }
+}
+
+/**
+ * Symbol and decimals for the amount in a token call: transfers and approvals
+ * on a token the treasury holds, and the Payer's USDC debts. Without this every
+ * large amount read as ETH, so a 30 stETH transfer showed as "30 ETH".
+ */
+function tokenAmountUnit(tx: DecodedTransaction): { symbol: string; decimals: number } | undefined {
+  const contracts = getContractsForChain(CHAIN_CONFIG.chain.id);
+  if (
+    tx.functionName === "sendOrRegisterDebt" &&
+    (isAddressEqual(tx.to, contracts.payer.address) || isAddressEqual(tx.to, CHAIN_CONFIG.addresses.nounsDaoPayer))
+  ) {
+    return { symbol: "USDC", decimals: 6 };
+  }
+  if (!["transfer", "transferFrom", "approve"].includes(tx.functionName)) return undefined;
+  const tokens: [Address, string, number][] = [
+    [CHAIN_CONFIG.addresses.usdc, "USDC", 6],
+    [CHAIN_CONFIG.addresses.wrappedNativeToken, "WETH", 18],
+    [CHAIN_CONFIG.addresses.stEth, "stETH", 18],
+    [contracts["reth-token"].address, "rETH", 18],
+    [contracts["oeth-token"].address, "OETH", 18],
+  ];
+  const match = tokens.find(([address]) => isAddressEqual(tx.to, address));
+  return match ? { symbol: match[1], decimals: match[2] } : undefined;
 }
 
 function parseErc20Amount(
