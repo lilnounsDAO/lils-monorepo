@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { VrgdaPoolSeed } from '@/data/ponder/vrgda/types';
 import { cleanGraphQLFetch, CLEAN_GRAPHQL_ENDPOINT } from '@/data/ponder/utils/cleanGraphQLFetch';
 import { isSepoliaNetwork } from '@/utils/networkDetection';
+import { correctVrgdaSeeds } from '@/data/ponder/vrgda/correctVrgdaSeeds';
 
 interface LatestBlockData {
   blockNumber: string;
@@ -280,9 +281,12 @@ export function useVrgdaRealtimePool({
       // Also mark all used seeds as seen to prevent them from being detected as new if they become available again
       usedSeeds.forEach((seed: any) => seenSeedIdsRef.current.add(seed.id));
 
+      // Traits as the auction will mint them, not as the indexer computed them
+      const additions = await correctVrgdaSeeds(newSeeds);
+
       const syncData: PoolSyncData = {
         changes: {
-          additions: newSeeds, // Only truly new seeds
+          additions, // Only truly new seeds
           usedSeeds: newlyUsedSeeds, // Only newly used seeds
           invalidations: [],
           totalNew: newSeeds.length,

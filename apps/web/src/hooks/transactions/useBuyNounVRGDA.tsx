@@ -3,7 +3,7 @@ import { UseSendTransactionReturnType, useSendTransaction } from "./useSendTrans
 import { encodeFunctionData, formatEther } from "viem";
 import { lilVRGDAConfig } from "@/config/lilVRGDAConfig";
 import { CustomTransactionValidationError } from "./types";
-import { multicall, readContract } from "viem/actions";
+import { multicall } from "viem/actions";
 import { CHAIN_SPECIFIC_CONFIGS } from "@/config";
 import { detectChainFromHostname } from "@/utils/networkDetection";
 import { mainnet, sepolia } from "viem/chains";
@@ -152,19 +152,38 @@ export function useBuyNounVRGDA(): UseBuyNounVRGDAReturnType {
         throw new Error("Unable to determine chain configuration");
       }
       
-      // Get current price for the transaction value
-      const currentPrice = await readContract(config.publicClient, {
-        address: config.addresses.lilVRGDAProxy,
-        abi: lilVRGDAConfig.abi,
-        functionName: "getCurrentVRGDAPrice",
+      // Current price for the transaction value, and the raw counter buyNow checks against
+      const [currentPrice, rawNextNounId] = await multicall(config.publicClient, {
+        contracts: [
+          {
+            address: config.addresses.lilVRGDAProxy,
+            abi: lilVRGDAConfig.abi,
+            functionName: "getCurrentVRGDAPrice",
+          },
+          {
+            address: config.addresses.lilVRGDAProxy,
+            abi: lilVRGDAConfig.abi,
+            functionName: "nextNounId",
+          },
+        ],
+        allowFailure: false,
       });
+
+      // buyNow wants the raw nextNounId, before it skips the lil nounders (x0) and
+      // Nouns DAO (x1) rewards it mints alongside the sale; the buyer still gets
+      // the purchasable id shown to them. Passing the purchasable id reverted
+      // with "Invalid or expired nounId" whenever a sale landed on a reward id.
+      // If the counter has moved past what the buyer was shown, the purchasable
+      // id is sent instead, so the validation below reports the noun as gone.
+      const contractNounId =
+        getNextPurchasableNounId(rawNextNounId) === expectedNounId ? rawNextNounId : expectedNounId;
 
       const request = {
         to: config.addresses.lilVRGDAProxy,
         data: encodeFunctionData({
           abi: lilVRGDAConfig.abi,
           functionName: "buyNow",
-          args: [expectedBlockNumber, expectedNounId],
+          args: [expectedBlockNumber, contractNounId],
         }),
         value: currentPrice,
         gasFallback: BigInt(200000), // VRGDA buyNow is more complex than a simple bid

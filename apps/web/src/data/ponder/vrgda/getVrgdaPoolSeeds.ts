@@ -3,6 +3,7 @@ import { VrgdaPoolSeed, VrgdaPoolSeedsResult, VrgdaFilters, VrgdaSortField, Sort
 import { cleanGraphQLFetch, CLEAN_GRAPHQL_ENDPOINT } from "../utils/cleanGraphQLFetch";
 import { GetVrgdaPoolSeedsDocument, OrderDirection, VrgdaPoolSeedWhereInput } from "@/data/generated/ponder/clean-graphql";
 import { isSepoliaNetwork } from "@/utils/networkDetection";
+import { correctVrgdaSeeds } from "./correctVrgdaSeeds";
 
 export async function getVrgdaPoolSeeds(
   filters: VrgdaFilters = {},
@@ -169,7 +170,8 @@ export async function getVrgdaPoolSeeds(
     console.log('getVrgdaPoolSeeds - mapped seeds:', seeds);
 
     return {
-      seeds,
+      // Traits as the auction will mint them, not as the indexer computed them
+      seeds: await correctVrgdaSeeds(seeds),
       hasMore: false, // For now, simplified
     };
   } catch (error) {
