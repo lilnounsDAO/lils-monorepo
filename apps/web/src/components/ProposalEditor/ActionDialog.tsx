@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { formatUnits, parseEther, parseUnits } from 'viem'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { Action } from '@/types/proposal-editor'
+import type { Action, PayerTopUpAction } from '@/types/proposal-editor'
 import { cn } from '@/utils/shadcn'
 import { useTokenPrices, formatUsdConversion } from '@/hooks/useTokenPrices'
 import { parseActionsFromJSON } from '@/utils/action-json-parser'
 import { FileJson, AlertCircle } from 'lucide-react'
+import { getPayerStatus, PayerStatus, payerFundingAvailable } from '@/data/payer/getPayerStatus'
+import { planTopUp, roundUpEther, TopUpPlan } from '@/data/payer/payerTopUp'
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import {
   DrawerDialog,
@@ -19,14 +23,34 @@ import {
 interface ActionDialogProps {
   isOpen: boolean
   onClose: () => void
-  onSubmit: (action: Action) => void
+  /**
+   * `topUp`, when set, is the payer top-up the proposal needs to fund this
+   * action's USDC: added, or replacing `topUp.replaces` (one of `otherActions`)
+   */
+  onSubmit: (action: Action, topUp?: { action: PayerTopUpAction; replaces?: PayerTopUpAction }) => void
   onDelete?: () => void
   action?: Action
   title?: string
   onBulkSubmit?: (actions: Action[]) => void
+  /** USDC the proposal's other actions already ask the Payer for, 6 decimals */
+  pendingUsdc?: bigint
+  /**
+   * Size a payer top-up for USDC asks the Payer can't cover, and submit it with
+   * the action. `otherActions` are the proposal's other actions: their USDC
+   * counts, and their top-ups are resized rather than duplicated.
+   */
+  fundUsdcWithTopUp?: boolean
+  otherActions?: Action[]
 }
 
-type ActionType = 'one-time-payment' | 'streaming-payment' | 'custom-transaction' | 'treasury-noun-transfer'
+type ActionType = 'one-time-payment' | 'streaming-payment' | 'custom-transaction' | 'treasury-noun-transfer' | 'payer-top-up'
+
+// Top-up fill amounts are padded 5% for price moves before the proposal executes
+const FILL_BUFFER_BPS = 500n
+
+const fmt = (value: bigint, decimals: number, digits = 4) =>
+  Number(formatUnits(value, decimals)).toLocaleString(undefined, { maximumFractionDigits: digits })
+
 
 const ActionDialog: React.FC<ActionDialogProps> = ({
   isOpen,
@@ -36,6 +60,9 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
   action,
   title = 'Add Action',
   onBulkSubmit,
+  pendingUsdc = 0n,
+  fundUsdcWithTopUp = false,
+  otherActions = [],
 }) => {
   const [actionType, setActionType] = useState<ActionType>('one-time-payment')
   const [formData, setFormData] = useState<any>({
@@ -55,6 +82,35 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
   const [showJsonImport, setShowJsonImport] = useState(false)
   const { prices } = useTokenPrices()
 
+  // USDC this action itself asks the Payer for, counted with the rest of the proposal
+  const thisActionUsdc = (() => {
+    if ((actionType !== 'one-time-payment' && actionType !== 'streaming-payment') || formData.currency !== 'usdc') return 0n
+    try {
+      return parseUnits(String(formData.amount || '0'), 6)
+    } catch {
+      return 0n
+    }
+  })()
+  const fundingAvailable = payerFundingAvailable()
+  const showPayer =
+    isOpen &&
+    fundingAvailable &&
+    (actionType === 'payer-top-up' ||
+      ((actionType === 'one-time-payment' || actionType === 'streaming-payment') && formData.currency === 'usdc'))
+  const { data: payerStatus, isLoading: loadingPayer, isError: payerError } = useQuery({
+    queryKey: ['payer-status', (pendingUsdc + thisActionUsdc).toString()],
+    queryFn: () => getPayerStatus(pendingUsdc + thisActionUsdc, FILL_BUFFER_BPS),
+    enabled: showPayer,
+    staleTime: 30_000,
+  })
+
+  // The top-up this USDC ask needs, if the Payer can't cover the proposal's USDC
+  const sizing = fundUsdcWithTopUp && fundingAvailable && thisActionUsdc > 0n
+  const plan = sizing && payerStatus ? planTopUp(payerStatus, otherActions) : undefined
+  // A USDC ask isn't added until the Payer has been checked, so it can't slip
+  // in without the top-up that funds it
+  const waitingOnPayer = sizing && !payerStatus
+
   // Update currency when switching action types
   useEffect(() => {
     setFormData((prev: typeof formData) => {
@@ -64,6 +120,9 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
       } else if (actionType === 'one-time-payment' && !['eth', 'weth', 'usdc', 'steth', 'reth', 'oeth'].includes(prev.currency)) {
         // Reset to eth if invalid currency for one-time payment
         return { ...prev, currency: 'eth' }
+      } else if (actionType === 'payer-top-up' && !['eth', 'steth'].includes(prev.currency)) {
+        // The treasury holds mostly stETH, which TokenBuyerV2 sells directly
+        return { ...prev, currency: 'steth' }
       }
       return prev
     })
@@ -81,7 +140,8 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
     } else {
       // Reset form when opening without an action
       // Default currency depends on action type
-      const defaultCurrency = actionType === 'streaming-payment' ? 'weth' : 'eth'
+      const defaultCurrency =
+        actionType === 'streaming-payment' ? 'weth' : actionType === 'payer-top-up' ? 'steth' : 'eth'
       setFormData({
         target: '',
         amount: '',
@@ -149,11 +209,18 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
           target: formData.target,
         }
         break
+      case 'payer-top-up':
+        actionData = {
+          type: 'payer-top-up',
+          amount: formData.amount,
+          currency: formData.currency === 'eth' ? 'eth' : 'steth',
+        }
+        break
       default:
         return
     }
 
-    onSubmit(actionData)
+    onSubmit(actionData, plan?.kind === 'add' ? { action: plan.topUp, replaces: plan.previous } : undefined)
     onClose()
   }
 
@@ -161,11 +228,13 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
     switch (actionType) {
       case 'one-time-payment':
       case 'streaming-payment':
-        return formData.target && formData.amount && parseFloat(formData.amount) > 0
+        return formData.target && formData.amount && parseFloat(formData.amount) > 0 && !waitingOnPayer
       case 'custom-transaction':
         return formData.contractCallTarget && formData.contractCallSignature
       case 'treasury-noun-transfer':
         return formData.target && formData.nounId
+      case 'payer-top-up':
+        return formData.amount && parseFloat(formData.amount) > 0
       default:
         return false
     }
@@ -264,6 +333,7 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
                 <option value="streaming-payment">Streaming payment</option>
                 <option value="custom-transaction">Custom transaction</option>
                 <option value="treasury-noun-transfer">Treasury Noun transfer</option>
+                {fundingAvailable && <option value="payer-top-up">Payer top-up (USDC funding)</option>}
               </select>
             </div>
 
@@ -301,6 +371,15 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
                   </div>
                 )}
               </div>
+              {formData.currency === 'usdc' && fundingAvailable && (
+                <PayerNote
+                  status={payerStatus}
+                  loading={loadingPayer}
+                  error={payerError}
+                  requested={pendingUsdc + thisActionUsdc}
+                  plan={plan}
+                />
+              )}
               <div className="space-y-2">
                 <Label htmlFor="target">Receiver account</Label>
                 <Input
@@ -347,6 +426,15 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
                   </div>
                 )}
               </div>
+              {formData.currency === 'usdc' && fundingAvailable && (
+                <PayerNote
+                  status={payerStatus}
+                  loading={loadingPayer}
+                  error={payerError}
+                  requested={pendingUsdc + thisActionUsdc}
+                  plan={plan}
+                />
+              )}
               <div className="space-y-2">
                 <Label htmlFor="target-stream">Receiver account</Label>
                 <Input
@@ -536,6 +624,64 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
             </>
           )}
 
+          {/* Payer Top-up Form */}
+          {actionType === 'payer-top-up' && (
+            <>
+              <p className="text-sm text-content-secondary">
+                The Payer pays every USDC grant. When it runs low, the TokenBuyer sells ETH or stETH to bots for
+                USDC that goes straight to the Payer. This sends the TokenBuyer what it needs to do that.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="amount-topup">Amount</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="amount-topup"
+                    type="number"
+                    step="0.0001"
+                    placeholder="0"
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    className="flex-1"
+                  />
+                  <select
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="rounded-xl border-2 border-border-primary bg-white px-4 py-3 text-base focus-visible:border-content-primary focus-visible:outline-none transition-colors"
+                  >
+                    <option value="steth">stETH</option>
+                    <option value="eth">ETH</option>
+                  </select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!payerStatus}
+                    title="Refill the Payer to its target, plus this proposal's USDC"
+                    onClick={() => {
+                      if (!payerStatus) return
+                      const needed = formData.currency === 'eth' ? payerStatus.ethToFill : payerStatus.stethToFill
+                      if (needed === null) return
+                      setFormData({ ...formData, amount: roundUpEther(needed) })
+                    }}
+                  >
+                    Fill
+                  </Button>
+                </div>
+                {formData.amount && (
+                  <div className="text-xs text-gray-500">
+                    {formatUsdConversion(formData.amount, formData.currency, prices)}
+                  </div>
+                )}
+              </div>
+              <TopUpStatus
+                status={payerStatus}
+                loading={loadingPayer}
+                pendingUsdc={pendingUsdc}
+                currency={formData.currency === 'eth' ? 'eth' : 'steth'}
+                amount={formData.amount}
+              />
+            </>
+          )}
+
           {/* Treasury Noun Transfer Form */}
           {actionType === 'treasury-noun-transfer' && (
             <>
@@ -592,6 +738,166 @@ const ActionDialog: React.FC<ActionDialogProps> = ({
         </DrawerDialogContentInner>
       </DrawerDialogContent>
     </DrawerDialog>
+  )
+}
+
+const symbolOf = (currency: 'eth' | 'steth') => (currency === 'eth' ? 'ETH' : 'stETH')
+
+/** Whether the Payer can pay a USDC request now, or will register it as a debt, and the top-up that funds it. */
+function PayerNote({
+  status,
+  loading,
+  error,
+  requested,
+  plan,
+}: {
+  status?: PayerStatus
+  loading: boolean
+  error?: boolean
+  requested: bigint
+  plan?: TopUpPlan
+}) {
+  if (error && !status) {
+    return (
+      <p className="text-xs text-semantic-negative">
+        Couldn&apos;t check the Payer, so this USDC ask can&apos;t be added yet. Close and try again.
+      </p>
+    )
+  }
+  if (loading || !status) {
+    return <p className="text-xs text-content-secondary">Checking the Payer…</p>
+  }
+  const short = status.askShortfall
+  const treasuryHas = (currency: 'eth' | 'steth') => (currency === 'eth' ? status.treasuryEth : status.treasurySteth)
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-3 text-xs',
+        short > 0n ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-gray-200 bg-gray-50 text-content-secondary',
+      )}
+    >
+      USDC is paid by the Payer, which holds <b>{fmt(status.payerUsdc, 6, 2)} USDC</b>
+      {status.payerDebt > 0n && <> and already owes {fmt(status.payerDebt, 6, 2)}</>}.{' '}
+      {short > 0n ? (
+        <>
+          This proposal asks for {fmt(requested, 6, 2)} USDC, so {fmt(short, 6, 2)} will be registered as a debt and
+          paid, in order, once the Payer is topped up.{' '}
+          {plan?.kind === 'add' ? (
+            plan.previous ? (
+              <>
+                The proposal&apos;s Payer top-up will be raised from {plan.previous.amount} to{' '}
+                <b>
+                  {plan.topUp.amount} {symbolOf(plan.topUp.currency)}
+                </b>{' '}
+                to fund it.
+              </>
+            ) : (
+              <>
+                A Payer top-up of{' '}
+                <b>
+                  {plan.topUp.amount} {symbolOf(plan.topUp.currency)}
+                </b>{' '}
+                will be added to fund it.
+              </>
+            )
+          ) : plan?.kind === 'unpriced' ? (
+            <b className="text-semantic-negative">
+              The TokenBuyer&apos;s price feeds can&apos;t be read right now, so the top-up that funds it can&apos;t be
+              sized. Add a Payer top-up yourself, or try again shortly.
+            </b>
+          ) : status.tokenBuyerSpareUsdc >= short ? (
+            <>The TokenBuyer already holds enough ETH and stETH to pay it off.</>
+          ) : (
+            <>The proposal&apos;s Payer top-ups already cover it.</>
+          )}
+          {plan?.kind === 'add' &&
+            treasuryHas(plan.topUp.currency) < parseEther(plan.topUp.amount) && (
+              <b className="text-semantic-negative">
+                {' '}
+                The treasury only holds {fmt(treasuryHas(plan.topUp.currency), 18)} {symbolOf(plan.topUp.currency)}.
+              </b>
+            )}
+        </>
+      ) : (
+        <>It can pay the {fmt(requested, 6, 2)} USDC this proposal asks for right away.</>
+      )}
+    </div>
+  )
+}
+
+/** The Payer's position and the TokenBuyer's, for sizing a top-up. */
+function TopUpStatus({
+  status,
+  loading,
+  pendingUsdc,
+  currency,
+  amount,
+}: {
+  status?: PayerStatus
+  loading: boolean
+  pendingUsdc: bigint
+  currency: 'eth' | 'steth'
+  amount: string
+}) {
+  if (loading || !status) {
+    return <p className="text-xs text-content-secondary">Checking the Payer and TokenBuyer…</p>
+  }
+  const symbol = symbolOf(currency)
+  const fill = currency === 'eth' ? status.ethToFill : status.stethToFill
+  const cover = currency === 'eth' ? status.ethToCoverAsk : status.stethToCoverAsk
+  const treasuryHas = currency === 'eth' ? status.treasuryEth : status.treasurySteth
+  const requested = parseFloat(amount) || 0
+  const overTreasury = requested > Number(formatUnits(treasuryHas, 18))
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-content-secondary">
+      <div>
+        Payer: <b>{fmt(status.payerUsdc, 6, 2)} USDC</b> held, {fmt(status.payerDebt, 6, 2)} owed, target{' '}
+        {fmt(status.baseline, 6, 0)} on top of debts.
+      </div>
+      <div>
+        TokenBuyer: holds {fmt(status.tokenBuyerEth, 18)} ETH and {fmt(status.tokenBuyerSteth, 18)} stETH, and wants{' '}
+        <b>{fmt(status.usdcNeeded, 6, 2)} USDC</b> more
+        {pendingUsdc > 0n && <>, plus {fmt(pendingUsdc, 6, 2)} for this proposal&apos;s USDC</>}.
+        {status.tokenBuyerPaused && <b className="text-semantic-negative"> It&apos;s paused, so it won&apos;t sell until unpaused.</b>}
+      </div>
+      {(fill === null || cover === null) && (
+        <div className="text-semantic-negative">
+          The TokenBuyer can&apos;t read the {symbol} price right now, so {symbol} amounts can&apos;t be sized. Try the
+          other asset, or again shortly.
+        </div>
+      )}
+      {pendingUsdc > 0n && cover !== null && (
+        <div>
+          This proposal&apos;s USDC leaves {fmt(status.askShortfall, 6, 2)} USDC as debt, which takes{' '}
+          {cover > 0n ? (
+            <b>
+              {roundUpEther(cover)} {symbol}
+            </b>
+          ) : (
+            <>nothing more — the TokenBuyer already holds enough</>
+          )}{' '}
+          to pay off.
+        </div>
+      )}
+      {fill !== null && (
+        <div>
+          <b>Fill</b> refills the Payer to its target as well:{' '}
+          {fill > 0n ? (
+            <b>
+              {roundUpEther(fill)} {symbol}
+            </b>
+          ) : (
+            <>nothing — the TokenBuyer already has enough</>
+          )}
+          , with a 5% buffer for price moves. Skip it if another proposal is already funding the TokenBuyer.
+        </div>
+      )}
+      {overTreasury && (
+        <div className="text-semantic-negative">
+          The treasury only holds {fmt(treasuryHas, 18)} {symbol}.
+        </div>
+      )}
+    </div>
   )
 }
 

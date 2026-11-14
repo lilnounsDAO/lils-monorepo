@@ -5,13 +5,17 @@ import ActionDialog from './ActionDialog'
 import SubmissionDialog from './SubmissionDialog'
 import SimulateVotesDialog from './SimulateVotesDialog'
 import { Button } from '@/components/ui/button'
-import type { Action } from '@/types/proposal-editor'
+import type { Action, PayerTopUpAction } from '@/types/proposal-editor'
+import { cn } from '@/utils/shadcn'
 import { Plus, ChevronDown, ChevronUp, Copy, ClipboardPaste, Save, Trash2, Vote } from 'lucide-react'
 import { useAccount, useSignMessage } from 'wagmi'
 import { useEnsResolution } from '@/hooks/useEnsResolution'
-import { isAddress, parseEther, parseUnits } from 'viem'
+import { formatEther, formatUnits, getAddress, isAddress, parseEther, parseUnits } from 'viem'
+import { getAddressOverrides } from '@/utils/addressOverrides'
+import { getPayerStatus, payerFundingAvailable } from '@/data/payer/getPayerStatus'
+import { applyTopUp, planTopUp } from '@/data/payer/payerTopUp'
 import { useTenderlySimulation } from '@/hooks/useTenderlySimulation'
-import { resolveAction, transactionsToActions, type Transaction } from '@/utils/transactions'
+import { normalizeCalldata, resolveAction, transactionsToActions, type Transaction, usdcRequested } from '@/utils/transactions'
 import { CHAIN_CONFIG } from '@/config'
 import { useQuery } from '@tanstack/react-query'
 import { getProposalIdea, normalizeIdeaId } from '@/data/goldsky/governance/getProposalIdeas'
@@ -132,6 +136,9 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [isActionDialogOpen, setIsActionDialogOpen] = useState(false)
   const [isSubmissionDialogOpen, setIsSubmissionDialogOpen] = useState(false)
   const [isSimulateVotesOpen, setIsSimulateVotesOpen] = useState(false)
+  // The payer top-up last added or resized to fund a USDC ask. Matched by object
+  // identity, so the highlight drops once that action is edited or replaced.
+  const [fundedTopUp, setFundedTopUp] = useState<{ action: PayerTopUpAction; previous?: string } | null>(null)
   const [editingActionIndex, setEditingActionIndex] = useState<number | null>(null)
   const { resolveEnsAddress } = useEnsResolution()
   const [resolvedAddresses, setResolvedAddresses] = useState<Record<string, string>>({})
@@ -1089,29 +1096,11 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
       }
       
       // Resolve ENS names in action before calling resolveAction
-      let resolvedAction: Action = { ...action }
-      if (action.type === 'one-time-payment' || action.type === 'streaming-payment' || action.type === 'treasury-noun-transfer') {
-        const target = action.target
-        if (target && !isAddress(target)) {
-          if (resolvedAddresses[target]) {
-            resolvedAction = { ...action, target: resolvedAddresses[target] as `0x${string}` }
-          } else {
-            // Skip if ENS name not resolved yet - will retry when resolved
-            map[i] = []
-            continue
-          }
-        }
-      } else if (action.type === 'custom-transaction') {
-        const target = action.contractCallTarget
-        if (target && !isAddress(target)) {
-          if (resolvedAddresses[target]) {
-            resolvedAction = { ...action, contractCallTarget: resolvedAddresses[target] as `0x${string}` }
-          } else {
-            // Skip if ENS name not resolved yet - will retry when resolved
-            map[i] = []
-            continue
-          }
-        }
+      const resolvedAction = withResolvedTargets(action)
+      if (!resolvedAction) {
+        // Skip if ENS name not resolved yet - will retry when resolved
+        map[i] = []
+        continue
       }
       
       try {
@@ -1129,6 +1118,41 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
     
     return map
   }, [currentActions, resolvedAddresses])
+
+  /** The action with ENS targets swapped for their addresses, or null while a name is still resolving. */
+  function withResolvedTargets(action: Action): Action | null {
+    if (action.type === 'one-time-payment' || action.type === 'streaming-payment' || action.type === 'treasury-noun-transfer') {
+      const target = action.target
+      if (!target || isAddress(target)) return action
+      return resolvedAddresses[target] ? { ...action, target: resolvedAddresses[target] as `0x${string}` } : null
+    }
+    if (action.type === 'custom-transaction') {
+      const target = action.contractCallTarget
+      if (!target || isAddress(target)) return action
+      return resolvedAddresses[target] ? { ...action, contractCallTarget: resolvedAddresses[target] as `0x${string}` } : null
+    }
+    return action
+  }
+
+  /** An address with its known name, e.g. "Lil Nouns Payer (0xF623…)". */
+  function addressOverrideLabel(address: string): string {
+    const name = isAddress(address) ? getAddressOverrides(getAddress(address))?.name : undefined
+    return name ? `${name} (${address})` : address
+  }
+
+  /**
+   * The exact calls an action submits, as the executor will run them, or null
+   * while an ENS target is still resolving (or the action is incomplete).
+   */
+  function submittedTransactions(action: Action): Transaction[] | null {
+    const resolved = withResolvedTargets(action)
+    if (!resolved) return null
+    try {
+      return resolveAction(resolved).map((tx) => ({ ...tx, calldata: normalizeCalldata(tx.signature, tx.calldata) }))
+    } catch {
+      return null
+    }
+  }
 
   // Helper to get simulation status for an action
   const getSimulationStatus = (actionIndex: number): 'idle' | 'simulating' | 'success' | 'error' => {
@@ -1218,18 +1242,57 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
     setIsActionDialogOpen(true)
   }
 
-  const handleActionSubmit = (action: Action) => {
+  const handleActionSubmit = (action: Action, topUp?: { action: PayerTopUpAction; replaces?: PayerTopUpAction }) => {
+    const newActions = [...currentActions]
     if (editingActionIndex !== null) {
       // Update existing action
-      const newActions = [...currentActions]
       newActions[editingActionIndex] = action
-      handleActionsChange(newActions)
     } else {
       // Add new action
-      handleActionsChange([...currentActions, action])
+      newActions.push(action)
     }
+    // A USDC ask the Payer can't cover comes with the top-up that funds it:
+    // the proposal's existing top-up is resized, or a new one goes last
+    if (topUp) {
+      // The dialog names the exact top-up object to resize, so the right one changes
+      const existing = topUp.replaces ? newActions.indexOf(topUp.replaces) : -1
+      if (existing >= 0) {
+        newActions[existing] = topUp.action
+        setFundedTopUp({ action: topUp.action, previous: describeTopUp(topUp.replaces!) })
+      } else {
+        newActions.push(topUp.action)
+        setFundedTopUp({ action: topUp.action })
+      }
+    }
+    handleActionsChange(newActions)
     setIsActionDialogOpen(false)
     setEditingActionIndex(null)
+  }
+
+  const formatUsdc = (amount: bigint) =>
+    Number(formatUnits(amount, 6)).toLocaleString(undefined, { maximumFractionDigits: 2 })
+
+  const describeTopUp = (topUp: PayerTopUpAction) => `${topUp.amount} ${topUp.currency === 'eth' ? 'ETH' : 'stETH'}`
+
+  // The whole proposal's USDC against the Payer, whichever way actions arrived
+  // (added, imported, pasted or loaded): if it creates debt nothing funds, offer
+  // the top-up that does
+  const proposalUsdc = usdcRequested(currentActions)
+  const { data: proposalPayerStatus } = useQuery({
+    queryKey: ['payer-status', proposalUsdc.toString()],
+    queryFn: () => getPayerStatus(proposalUsdc, 500n),
+    enabled: proposalUsdc > 0n && payerFundingAvailable(),
+    staleTime: 30_000,
+  })
+  const proposalTopUpPlan = proposalPayerStatus ? planTopUp(proposalPayerStatus, currentActions) : undefined
+
+  const applyProposalTopUp = () => {
+    if (proposalTopUpPlan?.kind !== 'add') return
+    handleActionsChange(applyTopUp(currentActions, proposalTopUpPlan))
+    setFundedTopUp({
+      action: proposalTopUpPlan.topUp,
+      previous: proposalTopUpPlan.previous ? describeTopUp(proposalTopUpPlan.previous) : undefined,
+    })
   }
 
   const handleBulkActionSubmit = (importedActions: Action[]) => {
@@ -1338,6 +1401,10 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
       switch (action.type) {
         case 'one-time-payment':
           if (!action.target || !action.amount) return 'Invalid payment action'
+          // USDC is paid by the Payer: sent now if it holds enough, otherwise registered as debt
+          if (action.currency === 'usdc') {
+            return `Pay ${action.amount} USDC to ${action.target.slice(0, 6)}...${action.target.slice(-4)} through the Payer (sendOrRegisterDebt)`
+          }
           return `Transfer ${action.amount} ${action.currency?.toUpperCase() || 'ETH'} to ${action.target.slice(0, 6)}...${action.target.slice(-4)}`
         case 'streaming-payment':
           if (!action.target || !action.amount) return 'Invalid streaming payment action'
@@ -1348,6 +1415,9 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         case 'treasury-noun-transfer':
           if (!action.target || !action.nounId) return 'Invalid noun transfer action'
           return `Transfer Noun #${action.nounId} to ${action.target.slice(0, 6)}...${action.target.slice(-4)}`
+        case 'payer-top-up':
+          if (!action.amount) return 'Invalid payer top-up'
+          return `Top up the Payer: send ${action.amount} ${action.currency === 'eth' ? 'ETH' : 'stETH'} to the TokenBuyer`
         default:
           return 'Unknown action'
       }
@@ -1364,13 +1434,19 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
           if (!action.target || !action.amount) {
             return { target: action.target || '', originalTarget: action.target || '', value: '0' }
           }
+          if (action.currency === 'usdc') {
+            const payer = CHAIN_CONFIG.addresses.lilNounsPayer
+            return {
+              target: payer,
+              originalTarget: payer,
+              value: `0 // sendOrRegisterDebt(${action.target}, ${parseUnits(action.amount, 6).toString()}) = ${action.amount} USDC`,
+            }
+          }
           try {
             // Parse decimal amount to wei/smallest unit
-            const parsedValue = action.currency === 'eth' 
+            const parsedValue = action.currency === 'eth'
               ? parseEther(action.amount)
-              : action.currency === 'usdc'
-              ? parseUnits(action.amount, 6) // USDC has 6 decimals
-              : parseUnits(action.amount, 18) // WETH has 18 decimals
+              : parseUnits(action.amount, 18) // WETH, stETH, rETH and OETH have 18 decimals
             return {
               target: action.target,
               originalTarget: action.target,
@@ -1418,6 +1494,14 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
             originalTarget: action.target || '',
             value: '0',
           }
+        case 'payer-top-up': {
+          const tokenBuyer = CHAIN_CONFIG.addresses.lilNounsTokenBuyer
+          const amount = action.amount ? parseEther(action.amount).toString() : '0'
+          // stETH goes by a transfer on the stETH contract; ETH is sent straight to the TokenBuyer
+          return action.currency === 'eth'
+            ? { target: tokenBuyer, originalTarget: tokenBuyer, value: `${amount} // ${action.amount} ETH` }
+            : { target: tokenBuyer, originalTarget: tokenBuyer, value: `0 // ${action.amount} stETH by stETH transfer` }
+        }
         default:
           return {}
       }
@@ -1552,12 +1636,27 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
                 const details = getActionDetails(action)
                 const isExpanded = expandedActions.has(index)
 
+                const funded = fundedTopUp?.action === action
+
                 return (
-                  <li key={index} className={index > 0 ? 'mt-6' : ''}>
+                  <li
+                    key={index}
+                    className={cn(
+                      index > 0 && 'mt-6',
+                      funded && '-ml-2 rounded-lg border border-amber-300 bg-amber-50 py-2 pl-2 pr-2',
+                    )}
+                  >
                     {/* Action Summary */}
                     <div className="text-gray-500 text-sm font-normal">
                       {getActionSummary(action)}
                     </div>
+                    {funded && (
+                      <div className="mt-1 text-xs font-medium text-amber-900">
+                        {fundedTopUp.previous
+                          ? `Changed from ${fundedTopUp.previous} to fund the proposal's USDC ask.`
+                          : "Added to fund the proposal's USDC ask, which the Payer can't cover yet."}
+                      </div>
+                    )}
 
                     {/* Action Controls */}
                     <div className="mt-1.5 flex gap-2">
@@ -1622,19 +1721,40 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
                         <div className="list-none pl-6 relative">
                           <div className="absolute -left-4 h-7 w-3 border-l border-b border-gray-200 rounded-bl-sm" />
                           <div className="bg-gray-50 p-3 rounded-lg font-mono text-xs relative">
-                            <div className="flex items-start mb-2">
-                              <span className="text-gray-500 mr-2 flex-shrink-0">target:</span>
-                              <span className="break-all flex-1">
-                                {details.originalTarget && resolvedAddresses[details.originalTarget]
-                                  ? `${resolvedAddresses[details.originalTarget]} (${details.originalTarget})`
-                                  : details.target || details.originalTarget || 'N/A'
-                                }
-                              </span>
-                            </div>
-                            <div className="flex items-start">
-                              <span className="text-gray-500 mr-2 flex-shrink-0">value:</span>
-                              <span className="break-all flex-1">{details.value}</span>
-                            </div>
+                            {(() => {
+                              // The exact calls this action submits, so what's shown is what executes
+                              const txs = submittedTransactions(action)
+                              if (!txs) {
+                                return (
+                                  <>
+                                    <div className="flex items-start mb-2">
+                                      <span className="text-gray-500 mr-2 flex-shrink-0">target:</span>
+                                      <span className="break-all flex-1">{details.target || details.originalTarget || 'N/A'}</span>
+                                    </div>
+                                    <div className="text-gray-500 font-sans">
+                                      {withResolvedTargets(action)
+                                        ? 'This action is incomplete, so its exact call can’t be built yet.'
+                                        : 'Resolving the ENS name to build the exact call…'}
+                                    </div>
+                                  </>
+                                )
+                              }
+                              return txs.map((tx, t) => (
+                                <div key={t} className={t > 0 ? 'mt-3 border-t border-gray-200 pt-3' : ''}>
+                                  {[
+                                    ['target', addressOverrideLabel(tx.target)],
+                                    ['value', BigInt(tx.value) > 0n ? `${tx.value} (${formatEther(BigInt(tx.value))} ETH)` : '0'],
+                                    ['signature', tx.signature || '(none — plain ETH send)'],
+                                    ['calldata', tx.calldata],
+                                  ].map(([label, text]) => (
+                                    <div key={label} className="flex items-start mb-1 last:mb-0">
+                                      <span className="text-gray-500 mr-2 flex-shrink-0">{label}:</span>
+                                      <span className="break-all flex-1">{text}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))
+                            })()}
                             
                             {/* Simulation Status Indicator */}
                             {(() => {
@@ -1709,6 +1829,32 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
                 )
               })}
             </ol>
+            {proposalTopUpPlan?.kind === 'add' && (
+              <div className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                This proposal asks the Payer for {formatUsdc(proposalUsdc)} USDC, which leaves{' '}
+                {formatUsdc(proposalPayerStatus!.askShortfall)} USDC as debt that nothing in it funds yet.{' '}
+                {proposalTopUpPlan.previous
+                  ? `Raising its Payer top-up from ${describeTopUp(proposalTopUpPlan.previous)} to ${describeTopUp(proposalTopUpPlan.topUp)} would.`
+                  : `A Payer top-up of ${describeTopUp(proposalTopUpPlan.topUp)} would.`}
+                <div className="mt-2">
+                  <Button
+                    variant="secondary"
+                    size="fit"
+                    onClick={applyProposalTopUp}
+                    disabled={editorDisabled}
+                    className="h-auto px-3 py-1 text-xs"
+                  >
+                    {proposalTopUpPlan.previous ? 'Raise the top-up' : 'Add the top-up'}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {proposalTopUpPlan?.kind === 'unpriced' && (
+              <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                This proposal&apos;s USDC leaves debt the Payer can&apos;t pay, and the TokenBuyer&apos;s price feeds
+                can&apos;t be read right now to size the top-up that funds it.
+              </div>
+            )}
 
             {/* Add Action Button (in actions list) */}
             <div className="mt-7 pl-6">
@@ -2264,8 +2410,11 @@ const ProposalEditor: React.FC<ProposalEditorProps> = ({
         onSubmit={handleActionSubmit}
         onBulkSubmit={handleBulkActionSubmit}
         onDelete={editingActionIndex !== null ? handleActionDelete : undefined}
-        action={editingActionIndex !== null ? actions[editingActionIndex] : undefined}
+        action={editingActionIndex !== null ? currentActions[editingActionIndex] : undefined}
         title={editingActionIndex !== null ? 'Edit Action' : 'Add action'}
+        pendingUsdc={usdcRequested(currentActions.filter((_, i) => i !== editingActionIndex))}
+        fundUsdcWithTopUp
+        otherActions={currentActions.filter((_, i) => i !== editingActionIndex)}
       />
 
       <ActionDialog

@@ -331,11 +331,11 @@ function validatePayerTopUp(item: any, prefix: string): ActionValidationResult {
     errors.push(`${prefix}: Field 'amount' must be a valid number`)
   }
 
-  // The TokenBuyer, which turns a top-up into USDC for the Payer, only takes ETH
+  // The TokenBuyer, which turns a top-up into USDC for the Payer, sells ETH and stETH
   if (!item.currency) {
     errors.push(`${prefix}: Missing required field 'currency'`)
-  } else if (item.currency !== 'eth') {
-    errors.push(`${prefix}: Invalid currency '${item.currency}'. Payer top-ups are ETH only: the TokenBuyer can't take stETH, rETH or OETH`)
+  } else if (item.currency !== 'eth' && item.currency !== 'steth') {
+    errors.push(`${prefix}: Invalid currency '${item.currency}'. Payer top-ups are ETH or stETH: the TokenBuyer can't take rETH or OETH`)
   }
 
   if (errors.length > 0) {
@@ -347,7 +347,7 @@ function validatePayerTopUp(item: any, prefix: string): ActionValidationResult {
     action: {
       type: 'payer-top-up',
       amount: String(item.amount),
-      currency: 'eth'
+      currency: item.currency as 'eth' | 'steth'
     }
   }
 }

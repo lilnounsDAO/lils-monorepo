@@ -41,13 +41,13 @@ export interface TreasuryNounTransferAction {
 }
 
 /**
- * ETH sent to the TokenBuyer, which sells it for USDC that funds the Payer.
- * ETH only: the TokenBuyer can't take stETH, rETH or OETH.
+ * ETH or stETH sent to the TokenBuyer, which sells it to bots for USDC that goes
+ * straight to the Payer. TokenBuyerV2 sells both; it can't take rETH or OETH.
  */
 export interface PayerTopUpAction {
   type: 'payer-top-up'
   amount: string
-  currency: 'eth'
+  currency: 'eth' | 'steth'
 }
 
 export type Action =
