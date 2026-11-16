@@ -40,6 +40,7 @@ export default function Footer() {
           <div className="flex items-center gap-3 paragraph-lg">
             <NounsDotComLogoLink darkMode />
             <span className="pt-[4px]">for Lil Nouns DAO</span>
+            <span className="pt-[6px] text-xs tabular-nums opacity-60">{__APP_VERSION__}</span>
           </div>
           <div className="flex max-w-[448px] flex-col gap-5">
             {/* <span>

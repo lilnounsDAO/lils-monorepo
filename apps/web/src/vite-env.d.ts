@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** Semver baked in at build: major.minor from package.json, patch from the commit count. */
+declare const __APP_VERSION__: string
+
 interface ImportMetaEnv {
   readonly VITE_ALCHEMY_API_KEY: string
   readonly VITE_INFURA_API_KEY: string

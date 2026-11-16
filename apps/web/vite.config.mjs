@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from 'vite-tsconfig-paths'
@@ -6,6 +8,37 @@ import { fileURLToPath } from 'node:url'
 import { discordApiPlugin } from './vite-plugin-discord-api.js'
 import { ogImagesPlugin } from './vite-plugin-og-images.js'
 import { rpcApiPlugin } from './vite-plugin-rpc-api.js'
+
+function readGit(command) {
+  return execSync(command, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim()
+}
+
+// major.minor come from apps/web/package.json. The patch is the commit count,
+// so each production deploy of new commits moves 1.0.80 → 1.0.81.
+function getAppVersion() {
+  if (process.env.VITE_APP_VERSION) return process.env.VITE_APP_VERSION
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  const [major = '1', minor = '0'] = String(pkg.version || '1.0.0').split('.')
+  try {
+    const shallow = readGit('git rev-parse --is-shallow-repository') === 'true'
+    if (shallow && process.env.NETLIFY) {
+      try {
+        execSync('git fetch --unshallow', { stdio: 'ignore' })
+      } catch {
+        // Already complete, or the remote refused. Fall through to the shallow count.
+      }
+    }
+    const patch = readGit('git rev-list --count HEAD') || '0'
+    return `${major}.${minor}.${patch}`
+  } catch {
+    return `${major}.${minor}.0`
+  }
+}
+
+const appVersion = getAppVersion()
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -173,6 +206,7 @@ export default defineConfig({
     'process.browser': 'true',
     'process.version': '"v20.0.0"',
     global: 'globalThis',
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
   
   // Optimize dependencies for monorepo

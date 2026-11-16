@@ -8,6 +8,8 @@ import { useAddRecentTransaction } from "@rainbow-me/rainbowkit";
 import { CHAIN_CONFIG } from "@/config";
 import { encodeFunctionData } from "viem";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipPopover } from "@/components/ui/tooltipPopover";
+import { Info } from "lucide-react";
 import { formatTimeLeft } from "@/utils/format";
 import { estimateGas, getBytecode } from "viem/actions";
 
@@ -110,7 +112,7 @@ interface ProposalActionsProps {
   isNounsDao?: boolean;
 }
 
-export function ProposalActions({ proposal, isNounsDao = false }: ProposalActionsProps) {
+export function ProposalActions({ proposal }: ProposalActionsProps) {
   const { address } = useAccount();
   const { writeContractAsync, isPending, data: hash } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed, isError: isFailed, error: receiptError } =
@@ -128,7 +130,7 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
   // Check if user is the proposer
   const isProposer = address?.toLowerCase() === proposal.proposerAddress.toLowerCase();
 
-  // Get proposal threshold
+  // Live DAO threshold, used only if the proposal's own stored threshold can't be read.
   const { data: proposalThreshold } = useReadContract({
     address: daoAddress,
     abi: DAO_ABI,
@@ -138,11 +140,21 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
     },
   });
 
+  // Cancel compares against the threshold stored on the proposal, not the current DAO setting.
+  const { data: onchainProposal } = useReadContract({
+    address: daoAddress,
+    abi: DAO_ABI,
+    functionName: "proposals",
+    args: [BigInt(proposal.id)],
+    query: {
+      enabled: !!daoAddress,
+    },
+  });
+
   // Get current block number
   const { data: blockNumber } = useBlockNumber();
 
-  // Check if proposer lost voting power (current voting power < threshold)
-  // This check is needed to determine if anyone can cancel (not just the proposer)
+  // getPriorVotes(proposer, block - 1) < proposal.proposalThreshold is what lets anyone cancel.
   const { data: currentProposerVotingPower } = useReadContract({
     address: tokenAddress,
     abi: NOUNS_TOKEN_ABI,
@@ -151,14 +163,15 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
       ? [proposal.proposerAddress, BigInt(blockNumber - 1n)]
       : undefined,
     query: {
-      enabled: !!proposalThreshold && !!blockNumber && !!tokenAddress,
+      enabled: !!blockNumber && !!tokenAddress,
     },
   });
 
-  const proposerLostPower =
-    proposalThreshold &&
+  const thresholdForCancel = onchainProposal?.proposalThreshold ?? proposalThreshold;
+  const proposerBelowThreshold =
+    thresholdForCancel !== undefined &&
     currentProposerVotingPower !== undefined &&
-    currentProposerVotingPower < proposalThreshold;
+    currentProposerVotingPower < thresholdForCancel;
 
   // Check if proposal is in objection period
   const { data: currentBlockNumber } = useBlockNumber();
@@ -194,21 +207,16 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
   // is simply absent and nothing says why, or until when.
   const showExecuteWait =
     proposal.state === "queued" && executionETA !== null && !executionEtaPassed;
-  // Show cancel button only if:
-  // 1. Proposal is in a cancelable state: pending, updatable, active, queued, or succeeded (but not executed)
-  // 2. AND (user is the proposer OR proposer lost voting power)
-  // FOR NOUNS ONLY: Only show if connected wallet is the proposer
+  // Cancel stays with the proposer in this UI. If their votes fell below the
+  // proposal's threshold, the contract lets anyone cancel, and the button explains that.
   const isCancelableState =
     proposal.state === "pending" ||
     proposal.state === "updatable" ||
     proposal.state === "active" ||
     proposal.state === "queued" ||
     (proposal.state === "successful" && proposal.state !== "executed");
-  const showCancelButton =
-    isCancelableState &&
-    (isNounsDao 
-      ? isProposer  // For Nouns: only show if connected wallet is proposer
-      : (isProposer || proposerLostPower));  // For Lil Nouns: show if proposer OR proposer lost power
+  const showCancelButton = isCancelableState && isProposer;
+  const showPublicCancelPointer = showCancelButton && proposerBelowThreshold;
 
   const handleQueue = async () => {
     if (!address || !daoAddress) return;
@@ -512,7 +520,7 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
     }
   }, [isFailed, receiptError]);
 
-  if (!showQueueButton && !showExecuteButton && !showExecuteWait && !showCancelButton) {
+  if (!showQueueButton && !showExecuteButton && !showExecuteWait && !showCancelButton && !showPublicCancelPointer) {
     return null;
   }
 
@@ -570,6 +578,21 @@ export function ProposalActions({ proposal, isNounsDao = false }: ProposalAction
         >
           {isCancelLoading ? "Processing..." : "Cancel Proposal"}
         </Button>
+      )}
+      {showPublicCancelPointer && (
+        <span className="flex items-center gap-1 text-content-secondary label-sm">
+          <TooltipPopover
+            trigger={
+              <Info
+                size={16}
+                strokeWidth={3}
+                className="cursor-help stroke-content-secondary"
+              />
+            }
+          >
+            Someone undelegated, so anyone can cancel this proposal now through the contracts or another interface.
+          </TooltipPopover>
+        </span>
       )}
       </div>
     </div>
