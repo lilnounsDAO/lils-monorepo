@@ -117,6 +117,9 @@ export function useSendTransaction(): UseSendTransactionReturnType {
             console.error("Error estimating gas, using default", e);
             gasEstimateWithBuffer = request.gasFallback; // Use fallback when gas estimation fails
           }
+          if (request.minGas && gasEstimateWithBuffer < request.minGas) {
+            gasEstimateWithBuffer = request.minGas;
+          }
           console.log("GAS LIMIT", gasEstimateWithBuffer);
 
           // Run transaction simulation - some RPC's won't support

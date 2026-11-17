@@ -305,6 +305,9 @@ export function useCastRefundableVote(): UseCastRefundableVoteReturnType {
         data,
         value: BigInt(0),
         gasFallback: BigInt(500000), // Vote generally ~200k, can be more if reason is long
+        // eth_estimateGas stops before the post-vote refund, so a 35% buffer
+        // still lands near 80k and the refund runs out of gas, reverting the vote.
+        minGas: refundable ? BigInt(200000) : undefined,
       };
 
       return sendTransaction(

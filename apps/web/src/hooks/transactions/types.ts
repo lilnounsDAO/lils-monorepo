@@ -5,6 +5,7 @@ export interface MinimalTransactionRequest {
   data: Hex;
   value: bigint;
   gasFallback: bigint; // Upper bound fallback for the gas required for the action, only used when estimation fails
+  minGas?: bigint; // Floor applied after the estimate buffer. Estimate undercounts castRefundableVote.
 }
 
 export class CustomTransactionValidationError extends Error {
