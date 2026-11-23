@@ -222,6 +222,8 @@ export async function getTreasuryData(
   const executorAddress = config.addresses.nounsTreasury;
   const payerAddress = contracts.payer.address;
   const tokenBuyerAddress = contracts["token-buyer"].address;
+  // The retired V1 can hold ETH until a proposal withdraws it
+  const tokenBuyerV1Address = contracts["token-buyer-v1"].address;
 
   // Get token addresses
   const usdcAddress = contracts["usdc-token"].address;
@@ -250,6 +252,7 @@ export async function getTreasuryData(
     tokenBuyerUsdcBalance,
     tokenBuyerOethBalance,
     tokenBuyerRethBalance,
+    tokenBuyerV1EthBalance,
     ethPriceUsd,
     executorNounsBalance,
     leagueNounsBalance,
@@ -275,6 +278,8 @@ export async function getTreasuryData(
     getTokenBalance(publicClient, usdcAddress, tokenBuyerAddress),
     getTokenBalance(publicClient, oethAddress, tokenBuyerAddress),
     getTokenBalance(publicClient, rethAddress, tokenBuyerAddress),
+    // Zero where a chain has no V1; the zero address holds burned ETH
+    tokenBuyerV1Address === zeroAddress ? Promise.resolve(0n) : getEthBalance(publicClient, tokenBuyerV1Address),
     // ETH price in USD
     getEthPriceUsd(),
     // Nouns DAO tokens owned/delegated to Lil Nouns executor/treasury
@@ -303,7 +308,7 @@ export async function getTreasuryData(
   };
 
   const tokenBuyer = {
-    eth: Number(formatUnits(tokenBuyerEthBalance, 18)),
+    eth: Number(formatUnits(tokenBuyerEthBalance + tokenBuyerV1EthBalance, 18)),
     steth: Number(formatUnits(tokenBuyerStethBalance.balance, tokenBuyerStethBalance.decimals)),
     weth: Number(formatUnits(tokenBuyerWethBalance.balance, tokenBuyerWethBalance.decimals)),
     usdc: Number(formatUnits(tokenBuyerUsdcBalance.balance, tokenBuyerUsdcBalance.decimals)),

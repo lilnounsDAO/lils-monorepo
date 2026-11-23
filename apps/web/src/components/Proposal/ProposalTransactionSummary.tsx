@@ -67,6 +67,7 @@ export default function ProposalTransactionSummary({
 
   const decodedTransactions = transactions.map(decodeTransaction);
   const summary = parseDecodedTransactionsSummary(decodedTransactions, chainId);
+  const payerFunding = parsePayerFunding(decodedTransactions);
   // The summary decodes past a doubled selector so it reads as intended, but on
   // chain the executor adds its own and every argument shifts — flag it loudly.
   const malformed = transactions.map((tx) => hasDoubledSelector(tx.signature, tx.calldata));
@@ -129,8 +130,15 @@ export default function ProposalTransactionSummary({
             <>
               Requesting <b>{summary}</b>
             </>
-          ) : (
+          ) : payerFunding == undefined ? (
             `${decodedTransactions.length} transaction${decodedTransactions.length > 1 ? "s" : ""}`
+          ) : null}
+          {/* Treasury funds moved to the TokenBuyer or Payer aren't grants, but still leave the treasury */}
+          {payerFunding != undefined && (
+            <span className={summary != undefined ? "block label-sm text-content-secondary" : undefined}>
+              {summary != undefined ? "Plus " : "Sends "}
+              <b>{payerFunding}</b> to fund the Payer&apos;s USDC payments
+            </span>
           )}
           {anyMalformed && (
             <span className="block text-semantic-negative label-sm">
@@ -315,7 +323,6 @@ function DecodedTransactionRenderer({
 }: DecodedTransaction) {
   const chainId = useChainId();
   const contracts = getContractsForChain(chainId);
-  const lilNounsTokenBuyerAddress = contracts["token-buyer"].address;
   
   // Check for both Nouns DAO and Lil Nouns DAO payer contracts
   const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsDaoPayer;
@@ -336,7 +343,10 @@ function DecodedTransactionRenderer({
   const isEthTransferToTokenBuyer = 
     functionName === "transfer" &&
     value > 0 &&
-    (isAddressEqual(to, nounsDaoTokenBuyer) || isAddressEqual(to, lilNounsTokenBuyerAddress));
+    (isAddressEqual(to, nounsDaoTokenBuyer) || isLilTokenBuyer(to));
+
+  // TokenBuyerV2 also sells stETH, sent to it with a stETH transfer
+  const stethToTokenBuyer = stethSentToTokenBuyer({ to, functionName, args, value });
 
   // For ETH transfers to token buyer, the function name might be "unknown" - show as transfer
   const displayFunctionName = isEthTransferToTokenBuyer && typeof functionName === 'string' && (functionName.startsWith("unknown") || functionName.includes("unknown"))
@@ -381,6 +391,13 @@ function DecodedTransactionRenderer({
       )}
       
       {/* Show helpful message for ETH transfer to token buyer */}
+      {stethToTokenBuyer > 0n && (
+        <div className="mt-2 text-xs text-content-secondary italic">
+          This sends {formatTokenAmount(stethToTokenBuyer, 18)} stETH to the DAO&apos;s TokenBuyer, which sells it to
+          bots for USDC that goes straight to the Payer. It funds USDC payments and isn&apos;t paid to anyone.
+        </div>
+      )}
+
       {isEthTransferToTokenBuyer && (
         <div className="mt-2 text-xs text-content-secondary italic">
           This transaction registers {formatTokenAmount(value, 18)} ETH to be sent to the DAO's Buyer contract so that the PayerContract can settle debts.
@@ -453,6 +470,22 @@ function tokenAmountUnit(tx: DecodedTransaction): { symbol: string; decimals: nu
   return match ? { symbol: match[1], decimals: match[2] } : undefined;
 }
 
+/** Either Lil Nouns TokenBuyer: V2, which the Payer is funded through now, or the retired V1. */
+function isLilTokenBuyer(address: Address): boolean {
+  return (
+    isAddressEqual(address, CHAIN_CONFIG.addresses.lilNounsTokenBuyer) ||
+    isAddressEqual(address, CHAIN_CONFIG.addresses.lilNounsTokenBuyerV1)
+  );
+}
+
+/** stETH a call transfers to a Lil Nouns TokenBuyer, or 0. */
+function stethSentToTokenBuyer(tx: DecodedTransaction): bigint {
+  if (!isAddressEqual(tx.to, CHAIN_CONFIG.addresses.stEth) || tx.functionName !== "transfer") return 0n;
+  const [recipient, amount] = tx.args;
+  if (recipient?.type !== "address" || !isLilTokenBuyer(getAddress(recipient.value as string))) return 0n;
+  return BigInt(amount?.value ?? 0);
+}
+
 function parseErc20Amount(
   tx: DecodedTransaction,
   erc20Address: Address,
@@ -475,6 +508,26 @@ function parseErc20Amount(
   }
 }
 
+/** ETH and stETH a proposal sends to fund USDC payments: to a Lil Nouns TokenBuyer or Payer. */
+function parsePayerFunding(transactions: DecodedTransaction[]): string | undefined {
+  let eth = 0n;
+  let steth = 0n;
+  for (const tx of transactions) {
+    if (
+      tx.functionName === "transfer" &&
+      tx.value > 0 &&
+      (isLilTokenBuyer(tx.to) || isAddressEqual(tx.to, CHAIN_CONFIG.addresses.lilNounsPayer))
+    ) {
+      eth += tx.value;
+    }
+    steth += stethSentToTokenBuyer(tx);
+  }
+  const items: string[] = [];
+  if (eth > 0n) items.push(`${formatTokenAmount(eth, 18)} ETH`);
+  if (steth > 0n) items.push(`${formatTokenAmount(steth, 18)} stETH`);
+  return items.length == 0 ? undefined : items.join(" + ");
+}
+
 function parseDecodedTransactionsSummary(
   transactions: DecodedTransaction[],
   chainId: number = 1,
@@ -489,7 +542,6 @@ function parseDecodedTransactionsSummary(
 
   try {
     const contracts = getContractsForChain(chainId);
-    const lilNounsTokenBuyerAddress = contracts["token-buyer"].address;
     const nounsDaoPayer = CHAIN_CONFIG.addresses.nounsDaoPayer;
     const lilNounsPayer = contracts.payer.address;
     const nounsDaoTokenBuyer = CHAIN_CONFIG.addresses.nounsDaoTokenBuyer;
@@ -504,7 +556,7 @@ function parseDecodedTransactionsSummary(
       const isEthToTokenBuyer = 
         tx.functionName === "transfer" &&
         tx.value > 0 &&
-        (isAddressEqual(tx.to, nounsDaoTokenBuyer) || isAddressEqual(tx.to, lilNounsTokenBuyerAddress));
+        (isAddressEqual(tx.to, nounsDaoTokenBuyer) || isLilTokenBuyer(tx.to));
 
       // Don't include ETH topups to payer/buyer contracts in the "Requesting" summary
       if (tx.functionName == "transfer" && !isEthToPayer && !isEthToTokenBuyer) {
@@ -516,7 +568,10 @@ function parseDecodedTransactionsSummary(
         tx,
         CHAIN_CONFIG.addresses.wrappedNativeToken,
       );
-      totalStEth += parseErc20Amount(tx, CHAIN_CONFIG.addresses.stEth);
+      // stETH topping up the TokenBuyer funds the Payer; it isn't requested by anyone
+      if (stethSentToTokenBuyer(tx) === 0n) {
+        totalStEth += parseErc20Amount(tx, CHAIN_CONFIG.addresses.stEth);
+      }
 
       // Include sendOrRegisterDebt USDC in the summary (it's a request) - check both payer contracts
       if (

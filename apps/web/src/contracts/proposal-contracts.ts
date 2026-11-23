@@ -29,6 +29,7 @@ const contractsFor = (chainId: typeof mainnet.id | typeof sepolia.id) => {
     token: at(addresses.nounsToken),
     payer: at(addresses.lilNounsPayer),
     'token-buyer': at(addresses.lilNounsTokenBuyer),
+    'token-buyer-v1': at(addresses.lilNounsTokenBuyerV1),
     'stream-factory': at(STREAM_FACTORY),
     'weth-token': at(addresses.wrappedNativeToken),
     'usdc-token': at(addresses.usdc),

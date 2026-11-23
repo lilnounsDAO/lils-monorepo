@@ -18,7 +18,9 @@ import {
   SidebarMainContent,
   SidebarProvider,
   SidebarSideContent,
+  useSidebar,
 } from '@/components/Sidebar/ProposalSidebar'
+import { AnimatePresence, motion } from 'framer-motion'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import SearchProvider, { SearchInput } from '@/components/Search'
@@ -140,7 +142,7 @@ export default function VoteDetailPage() {
 
             {/* Desktop */}
             <div className="hidden w-full lg:block">
-              <SidebarProvider>
+              <SidebarProvider defaultOpen={false}>
                 <SidebarMainContent>
                   <div className="flex w-full max-w-[780px] flex-col gap-8 p-6 pb-24 md:p-10 md:pb-24">
                     <div className="flex w-full flex-col gap-8 md:px-4">
@@ -151,7 +153,10 @@ export default function VoteDetailPage() {
                         <span className="text-content-secondary">{daoName} Proposal {proposalId}</span>
                       </div>
 
-                      <ProposalTopWrapper proposalId={proposalId} isNounsDao={isNounsDaoProposal} />
+                      <div className="flex w-full flex-col">
+                        <ProposalTopWrapper proposalId={proposalId} isNounsDao={isNounsDaoProposal} />
+                        <InlineVotingSummary proposalId={proposalId} isNounsDao={isNounsDaoProposal} />
+                      </div>
                       <ProposalMarkdownWrapper proposalId={proposalId} isNounsDao={isNounsDaoProposal} />
                     </div>
 
@@ -1135,6 +1140,31 @@ Wylin is an artist and entrepreneur. After exhibiting in galleries, he dropped o
     <MarkdownRenderer className="gap-4">
       {description}
     </MarkdownRenderer>
+  )
+}
+
+// Vote tally shown in the main column while the sidebar is closed
+function InlineVotingSummary({ proposalId, isNounsDao }: { proposalId: number; isNounsDao: boolean }) {
+  const { isOpen } = useSidebar()
+
+  return (
+    <AnimatePresence initial={false}>
+      {!isOpen && (
+        <motion.div
+          key="inline-voting-summary"
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.25, ease: 'easeInOut' }}
+          className="overflow-hidden"
+        >
+          <div className="flex flex-col gap-4 pt-8">
+            <h2 className="heading-6">Proposal votes</h2>
+            <VotingSummaryWrapper proposalId={proposalId} isNounsDao={isNounsDao} />
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 

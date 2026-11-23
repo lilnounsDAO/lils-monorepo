@@ -1,5 +1,5 @@
 import type { Action, OneTimePaymentAction } from '@/types/proposal-editor'
-import { parseEther, parseUnits, encodeFunctionData, encodeAbiParameters, parseAbiParameters, getAddress, decodeAbiParameters, parseAbi, formatEther, formatUnits, toFunctionSelector } from 'viem'
+import { parseEther, parseUnits, encodeFunctionData, encodeAbiParameters, parseAbiParameters, getAddress, decodeAbiParameters, parseAbi, formatEther, formatUnits, toFunctionSelector, zeroAddress } from 'viem'
 import { contracts, getContractsForChain } from '@/contracts/proposal-contracts'
 import { Address } from 'viem'
 import { CHAIN_CONFIG, CHAIN_SPECIFIC_CONFIGS } from '@/config'
@@ -332,29 +332,31 @@ const resolveCustomTransaction = (action: Extract<Action, { type: 'custom-transa
 }
 
 /**
- * Resolve treasury noun transfer action
- */
-/**
  * Resolve payer top-up action
  *
- * The Payer only holds USDC, and is refilled by the TokenBuyer, which sells ETH
- * it's sent for USDC and forwards it. Lil Nouns has always topped up this way:
- * plain ETH sent to the TokenBuyer (props 241, 254, 274, 281, 283 and 354).
+ * The Payer only holds USDC, and is refilled by the TokenBuyer, which sells what
+ * it's sent to bots for USDC that goes straight to the Payer. TokenBuyerV2 sells
+ * ETH, sent to it plainly as Lil Nouns always has (props 241 to 354), and stETH,
+ * sent with a stETH transfer. The treasury holds mostly stETH, so that's the
+ * usual top-up now.
  */
 const resolvePayerTopUp = (action: Extract<Action, { type: 'payer-top-up' }>): Transaction[] => {
-  if (action.currency !== 'eth') {
-    throw new Error(`Payer top-ups are ETH only: the TokenBuyer can't take ${String(action.currency).toUpperCase()}`)
+  const tokenBuyer = CHAIN_CONFIG.addresses.lilNounsTokenBuyer
+  if (sameAddress(tokenBuyer, zeroAddress)) {
+    throw new Error('There is no TokenBuyer on this network to top up')
   }
-  return [
-    {
-      target: CHAIN_CONFIG.addresses.lilNounsTokenBuyer,
-      value: parseEther(action.amount).toString(),
-      signature: '',
-      calldata: '0x',
-    },
-  ]
+  if (action.currency === 'eth') {
+    return [{ target: tokenBuyer, value: parseEther(action.amount).toString(), signature: '', calldata: '0x' }]
+  }
+  if (action.currency === 'steth') {
+    return [call(CHAIN_CONFIG.addresses.stEth, 'transfer(address,uint256)', [tokenBuyer, parseEther(action.amount)])]
+  }
+  throw new Error(`Payer top-ups are ETH or stETH: the TokenBuyer can't take ${String(action.currency).toUpperCase()}`)
 }
 
+/**
+ * Resolve treasury noun transfer action
+ */
 const resolveTreasuryNounTransfer = (action: Extract<Action, { type: 'treasury-noun-transfer' }>): Transaction[] => {
   const { nounId, target } = action
   return [
@@ -425,6 +427,22 @@ export const resolveActions = (actions: Action[]): Transaction[] => {
 }
 
 /**
+ * USDC the actions ask the Payer for (6 decimals): one-time USDC payments and
+ * USDC streams, all of which the Payer pays or registers as debt.
+ */
+export const usdcRequested = (actions: Action[]): bigint =>
+  actions.reduce((total, action) => {
+    if ((action.type === 'one-time-payment' || action.type === 'streaming-payment') && action.currency === 'usdc') {
+      try {
+        return total + parseUnits(action.amount, 6)
+      } catch {
+        return total
+      }
+    }
+    return total
+  }, 0n)
+
+/**
  * Estimate total ETH value needed for all transactions
  */
 export const calculateTotalValue = (transactions: Transaction[]): bigint => {
@@ -473,6 +491,24 @@ const decodeTokenPayment = (
   return undefined
 }
 
+// Zero where a chain has no TokenBuyer, and a send to 0x0 is a burn, not a top-up
+const isTokenBuyer = (address: string) =>
+  !sameAddress(address, zeroAddress) &&
+  (sameAddress(address, CHAIN_CONFIG.addresses.lilNounsTokenBuyer) ||
+    sameAddress(address, CHAIN_CONFIG.addresses.lilNounsTokenBuyerV1))
+
+/** A payer top-up: ETH sent to either TokenBuyer, or stETH transferred to one. */
+const decodePayerTopUp = (tx: Transaction): Extract<Action, { type: 'payer-top-up' }> | undefined => {
+  if (tx.signature === '' && BigInt(tx.value) > 0n && isTokenBuyer(tx.target)) {
+    return { type: 'payer-top-up', amount: formatEther(BigInt(tx.value)), currency: 'eth' }
+  }
+  if (tx.signature === 'transfer(address,uint256)' && sameAddress(tx.target, CHAIN_CONFIG.addresses.stEth)) {
+    const send = decodeSend(tx)
+    if (send && isTokenBuyer(send.to)) return { type: 'payer-top-up', amount: formatEther(send.amount), currency: 'steth' }
+  }
+  return undefined
+}
+
 /** How many transactions from `i` fund `stream`, or 0 when what follows isn't its funding. */
 const fundingLength = (transactions: Transaction[], i: number, currency: TokenCurrency, stream: Address): number => {
   const payment = transactions[i] ? decodeTokenPayment(transactions, i) : undefined
@@ -490,9 +526,10 @@ export const transactionsToActions = (transactions: Transaction[], chainId: numb
   while (i < transactions.length) {
     const tx = transactions[i]
     
-    // ETH sent to the TokenBuyer tops up the Payer
-    if (tx.signature === '' && BigInt(tx.value) > 0n && sameAddress(tx.target, CHAIN_CONFIG.addresses.lilNounsTokenBuyer)) {
-      actions.push({ type: 'payer-top-up', amount: formatEther(BigInt(tx.value)), currency: 'eth' })
+    // ETH or stETH sent to a TokenBuyer tops up the Payer
+    const topUp = decodePayerTopUp(tx)
+    if (topUp) {
+      actions.push(topUp)
       i++
       continue
     }

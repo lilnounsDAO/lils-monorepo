@@ -25,6 +25,8 @@ function initializeAddressOverrides() {
     const nounsToken = getAddress(CHAIN_CONFIG.addresses.nounsToken);
     const lilNounsPayer = getAddress(CHAIN_CONFIG.addresses.lilNounsPayer);
     const nounsDaoPayer = getAddress(CHAIN_CONFIG.addresses.nounsDaoPayer);
+    const lilNounsTokenBuyer = getAddress(CHAIN_CONFIG.addresses.lilNounsTokenBuyer);
+    const lilNounsTokenBuyerV1 = getAddress(CHAIN_CONFIG.addresses.lilNounsTokenBuyerV1);
 
     ADDRESS_OVERRIDES = {
       [treasury.toLowerCase()]: {
@@ -45,6 +47,14 @@ function initializeAddressOverrides() {
       },
       [nounsDaoPayer.toLowerCase()]: {
         name: "Nouns DAO Payer",
+        avatar: "/nouns-treasury.png",
+      },
+      [lilNounsTokenBuyer.toLowerCase()]: {
+        name: "Lil Nouns TokenBuyer",
+        avatar: "/nouns-treasury.png",
+      },
+      [lilNounsTokenBuyerV1.toLowerCase()]: {
+        name: "Lil Nouns TokenBuyer (V1)",
         avatar: "/nouns-treasury.png",
       },
     };
