@@ -31,8 +31,14 @@ export function useSidebar() {
   return context;
 }
 
-export function SidebarProvider({ children }: { children: ReactNode }) {
-  const [isOpen, setIsOpen] = useState(true);
+export function SidebarProvider({
+  children,
+  defaultOpen = true,
+}: {
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const toggleSidebar = () => {
     setIsOpen(!isOpen);
@@ -85,11 +91,11 @@ export function SidebarSideContent({
   const { isOpen } = useSidebar();
   return (
     <motion.div
+      initial={false}
       animate={{ width: isOpen ? SIDEBAR_WIDTH : 0 }}
       className={cn(
         "sticky top-[64px] h-[calc(100dvh-64px)] shrink-0 overflow-hidden border-l",
       )}
-      style={{ width: SIDEBAR_WIDTH }}
     >
       <div
         className={cn("h-full overflow-y-auto", className)}
