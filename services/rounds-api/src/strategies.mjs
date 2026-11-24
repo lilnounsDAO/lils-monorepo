@@ -43,7 +43,7 @@ function lowerEntries(entries) {
 
 /** Delegated Lil Nouns votes, at the round's snapshot block once it has one. */
 async function lilNounsVotes({ client, token, address, block }) {
-  if (block) {
+  if (block != null) {
     return client.readContract({
       address: token,
       abi: VOTES_ABI,

@@ -60,7 +60,8 @@ rules never change under it.
 
 **Voting** — `{"type":"lil-nouns-votes","multiplier":1}` (default: one vote per
 delegated Lil Noun at the snapshot block), `{"type":"fixed","votes":"1","min":"0"}`
-(a flat number per wallet, optionally gated on holding Lil Nouns),
+(a flat number per wallet, with any positive `min` measured in delegated votes
+at the round's snapshot block),
 `{"type":"allowlist","entries":{"0x…":"5"}}`.
 
 Imported rounds carry `{"type":"archive"}`, which gives nobody the right to
