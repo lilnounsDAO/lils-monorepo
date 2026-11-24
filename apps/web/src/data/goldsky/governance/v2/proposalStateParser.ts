@@ -53,37 +53,28 @@ export const getProposalStateV2 = (
   const startBlock = parseInt(proposal.startBlock);
   const endBlock = parseInt(proposal.endBlock);
 
-  // Handle PENDING status - check if voting has started
-  if (status === ProposalState.Pending) {
+  // Goldsky often leaves status at PENDING after voting starts and ends.
+  // Use the block window for both PENDING and ACTIVE instead of trusting that.
+  if (status === ProposalState.Pending || status === ProposalState.Active) {
     if (currentBlock <= startBlock) {
       return ProposalState.Pending;
     }
-    // Voting has started, transition to ACTIVE
-    return ProposalState.Active;
-  }
-
-  // Handle ACTIVE status - check if voting has ended and determine outcome
-  if (status === ProposalState.Active) {
-    if (currentBlock > endBlock) {
-      // Voting has ended - determine success/failure
-      const forVotes = BigInt(proposal.forVotes);
-      const againstVotes = BigInt(proposal.againstVotes);
-      const quorumVotes = BigInt(proposal.quorumVotes);
-
-      // Check if defeated (no quorum or more against votes)
-      if (forVotes <= againstVotes || forVotes < quorumVotes) {
-        return ProposalState.Defeated;
-      }
-      
-      // Check if succeeded (has quorum and more for votes)
-      // If executionETA exists, it's queued; otherwise succeeded
-      if (proposal.executionETA) {
-        return ProposalState.Queued;
-      }
-      return ProposalState.Succeeded;
+    if (currentBlock <= endBlock) {
+      return ProposalState.Active;
     }
-    // Still active
-    return ProposalState.Active;
+
+    const forVotes = BigInt(proposal.forVotes);
+    const againstVotes = BigInt(proposal.againstVotes);
+    const quorumVotes = BigInt(proposal.quorumVotes);
+
+    if (forVotes <= againstVotes || forVotes < quorumVotes) {
+      return ProposalState.Defeated;
+    }
+
+    if (proposal.executionETA) {
+      return ProposalState.Queued;
+    }
+    return ProposalState.Succeeded;
   }
 
   // Handle QUEUED status - check if expired
