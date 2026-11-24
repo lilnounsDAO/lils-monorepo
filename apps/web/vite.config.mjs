@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { discordApiPlugin } from './vite-plugin-discord-api.js'
 import { ogImagesPlugin } from './vite-plugin-og-images.js'
 import { rpcApiPlugin } from './vite-plugin-rpc-api.js'
+import { pwaPlugin } from './vite-plugin-pwa.mjs'
 
 function readGit(command) {
   return execSync(command, {
@@ -46,6 +47,7 @@ const __dirname = dirname(__filename)
 export default defineConfig({
   plugins: [
     react(),
+    pwaPlugin(),
     tsconfigPaths({
       ignoreConfigErrors: true, // Ignore errors in subgraph packages' tsconfig files
     }), // Handles path aliases from tsconfig

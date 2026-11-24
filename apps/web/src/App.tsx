@@ -68,8 +68,6 @@ function App() {
       <Helmet>
         <title>Lilnouns.wtf | Lil Nouns DAO Governance Hub</title>
         <meta name="description" content="Lilnouns.wtf – Lil Nouns DAO" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#ffffff" />
         
         {/* OpenGraph */}
         <meta property="og:url" content="https://www.lilnouns.wtf" />
@@ -78,12 +76,6 @@ function App() {
         <meta property="og:locale" content="en_US" />
         <meta property="og:title" content="Lilnouns.wtf – Lil Nouns DAO" />
         <meta property="og:description" content="Lilnouns.wtf" />
-        
-        {/* Apple Web App */}
-        <meta name="apple-mobile-web-app-title" content="Lilnouns.wtf" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
         
         {/* Robots */}
         <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />

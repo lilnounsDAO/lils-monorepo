@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="robots" content="noindex" />
+    <meta name="lil-nouns-offline" content="1" />
+    <title>Connection unavailable | Lil Nouns</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0;
+        padding: 1.5rem;
+        background: #fff;
+        color: #202020;
+        font-family: system-ui, sans-serif;
+        line-height: 1.5;
+      }
+      main { max-width: 25rem; }
+      img { display: block; border-radius: .75rem; }
+      h1 { margin: 1rem 0 .5rem; line-height: 1.2; }
+      p { margin: 0 0 1.5rem; }
+      a {
+        display: inline-grid;
+        place-items: center;
+        min-height: 44px;
+        padding: .5rem 1rem;
+        border-radius: .5rem;
+        background: #202020;
+        color: #fff;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      a:focus-visible { outline: 2px solid #202020; outline-offset: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="data:image/png;base64,__LIL_NOUNS_ICON__" width="56" height="56" alt="Lil Nouns" />
+      <h1>Connection unavailable</h1>
+      <p>Lil Nouns couldn’t load this page. Live proposals, auctions, and wallet actions require a connection.</p>
+      <a href="/">Try again</a>
+    </main>
+    <script>
+      const retry = document.querySelector('a');
+      if (window.location.pathname !== '/offline.html') {
+        retry.href = window.location.href;
+        retry.addEventListener('click', (event) => {
+          if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          window.location.reload();
+        });
+      }
+    </script>
+  </body>
+</html>
