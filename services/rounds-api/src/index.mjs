@@ -37,6 +37,7 @@ import {
   normalizeStrategy,
   votingPower,
 } from "./strategies.mjs";
+import { cachedVotingPower } from "./voting-power-cache.mjs";
 
 const env = process.env;
 const PORT = Number(env.PORT || 3040);
@@ -549,7 +550,7 @@ async function getPower(round, address) {
 
   const power = state === "pending" || state === "proposing"
     ? await votingPower({ strategy: round.vote_strategy, chain, address, block: null })
-    : await cachedVotingPower(round, address);
+    : await cachedVotingPower(db, chain, round, address);
   const { rows: [spent] } = await db.query(
     `SELECT coalesce(sum(weight), 0)::text AS used FROM rounds.vote WHERE round_id = $1 AND voter = $2`,
     [round.id, voter],
@@ -566,46 +567,6 @@ async function getPower(round, address) {
     canVote: state === "voting" && power > used,
     snapshotBlock: round.snapshot_block == null ? null : Number(round.snapshot_block),
   };
-}
-
-/**
- * Voting power is pinned to the round's snapshot block and cached, so buying or
- * selling a Lil Noun mid-round cannot change a ballot already in flight.
- */
-async function cachedVotingPower(round, address) {
-  const voter = address.toLowerCase();
-  const { rows: [cached] } = await db.query(
-    `SELECT power::text AS power FROM rounds.voting_power WHERE round_id = $1 AND voter = $2`,
-    [round.id, voter],
-  );
-  if (cached) return BigInt(cached.power);
-
-  const needsBlock = (round.vote_strategy?.type ?? DEFAULT_VOTE_STRATEGY.type) === "lil-nouns-votes";
-  const block = needsBlock ? round.snapshot_block ?? (await snapshotBlock(round)) : null;
-  const power = await votingPower({ strategy: round.vote_strategy, chain, address, block });
-  await db.query(
-    `INSERT INTO rounds.voting_power (round_id, voter, power, block) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (round_id, voter) DO NOTHING`,
-    [round.id, voter, String(power), block],
-  );
-  return power;
-}
-
-/**
- * The block voting power is read at. Normally the ticker pins it the moment
- * voting opens; this covers a round whose voting window opened while the ticker
- * was down.
- */
-async function snapshotBlock(round) {
-  if (round.snapshot_block != null) return Number(round.snapshot_block);
-  const block = await client.getBlockNumber();
-  const { rows: [updated] } = await db.query(
-    `UPDATE rounds.round SET snapshot_block = coalesce(snapshot_block, $2), updated_at = now()
-      WHERE id = $1 RETURNING snapshot_block`,
-    [round.id, Number(block)],
-  );
-  round.snapshot_block = updated.snapshot_block;
-  return Number(updated.snapshot_block);
 }
 
 // ---------------------------------------------------------------------------
@@ -919,7 +880,7 @@ async function castVotes(req, handle) {
   });
 
   const voter = signer.toLowerCase();
-  const power = await cachedVotingPower(round, signer);
+  const power = await cachedVotingPower(db, chain, round, signer);
   if (power === 0n) throw new HttpError(403, "That wallet had no Lil Nouns votes at the snapshot block.");
 
   const asked = parsed.reduce((total, entry) => total + entry.votes, 0n);
