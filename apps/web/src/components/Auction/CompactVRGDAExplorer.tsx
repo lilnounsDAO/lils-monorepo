@@ -37,6 +37,7 @@ function useBreakpointValues<T>(values: Record<string, T>): T | undefined {
 
 export const CompactVRGDAExplorer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const headingId = React.useId();
   const [showFilterSidebar, setShowFilterSidebar] = useState(false);
   const [showSavedView, setShowSavedView] = useState(false);
   
@@ -243,15 +244,15 @@ export const CompactVRGDAExplorer: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Content Area - Flexible width with layout animation */}
-      <motion.div layout className="flex-1 flex flex-col">
+      {/* Let the content shrink so the grid scrolls within the card. */}
+      <motion.div layout className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <div className="border-b border-gray-200 px-4 py-3">
           <div className="flex flex-col gap-3">
             {/* Title and count */}
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
-                <h3 className="text-xl font-bold text-gray-900">
+                <h3 id={headingId} className="text-xl font-bold text-gray-900">
                   VRGDA Pools
                 </h3>
                 <motion.span 
@@ -280,8 +281,8 @@ export const CompactVRGDAExplorer: React.FC = () => {
             </div>
 
             {/* Controls row - larger buttons on same line */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {/* Saved Button */}
                 <motion.button
                   onClick={() => {
@@ -351,7 +352,10 @@ export const CompactVRGDAExplorer: React.FC = () => {
         <motion.div
           layout
           ref={containerRef}
-          className="flex-1 overflow-y-auto overscroll-contain px-2 py-3"
+          role="region"
+          aria-labelledby={headingId}
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-auto overscroll-contain px-2 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gray-500"
         >
           <div
             style={{
